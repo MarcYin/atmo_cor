@@ -7,6 +7,8 @@ import cPickle as pkl
 from functools import partial
 from emulation_engine import AtmosphericEmulationEngine
 from grab_uncertainty import grab_uncertainty
+from scipy import optimize 
+
 class atmo_cor(object):
     '''
     A class taking the toa, boa, initial [aot, water, ozone], [vza, sza, vaa, saa], elevation and emulators
@@ -27,7 +29,7 @@ class atmo_cor(object):
                        gradient_refl=True, 
                        bands=None):
         
-        self.alpha         = 1.42 #angstrom exponent for continental type aerosols
+        self.alpha         = -1.42 #angstrom exponent for continental type aerosols
         self.sensor        = sensor
         self.emus_dir      = emus_dir
         self.boa, self.toa = boa, toa
@@ -49,6 +51,10 @@ class atmo_cor(object):
     
     def _load_emus(self):
         self.AEE = AtmosphericEmulationEngine(self.sensor, self.emus_dir)
+        up_bounds   = self.AEE.emulators[0].inputs[:,4:7].max(axis=0)
+        low_bounds  = self.AEE.emulators[0].inputs[:,4:7].min(axis=0)
+        self.bounds = np.array([low_bounds, up_bounds]).T 
+
     def _load_unc(self):
         uc = grab_uncertainty(self.boa, self.boa_bands, self.boa_qa )
         self.boa_unc   = uc.get_boa_unc()
@@ -88,7 +94,7 @@ class atmo_cor(object):
 
         return flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, flat_angs_ele # [sza, vza, saa, vaa, elevation]        
 
-    def obs_cost(self,):
+    def obs_cost(self,is_full=False):
 
         flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, [sza, vza, saa, vaa, elevation] = self._sort_emus_inputs()
         H0, dH = self.AEE.emulator_reflectance_atmosphere(flat_boa, flat_atmos, sza, vza, saa, vaa, elevation, bands=self.band_indexs)
@@ -99,11 +105,14 @@ class atmo_cor(object):
         dH[:,~correction_mask,:] = 0.
         J  = (0.5 * self.band_weights[...,None] * diff**2 / flat_boa_unc**2).sum(axis=(0,1))
         full_dJ = [ self.band_weights[...,None] * dH[:,:,i] * diff/flat_boa_unc**2 for i in xrange(4,7)]
-        J_ = np.array(full_dJ).sum(axis=(1,2))
+        if is_full:
+            J_ = np.array(full_dJ).sum(axis=(1,))
+        else:
+            J_ = np.array(full_dJ).sum(axis=(1,2))
         
         return J, J_
 
-    def prior_cost(self,):
+    def prior_cost(self,is_full=False):
         # maybe need to update to per pixel basis uncertainty 
         # instead of using scaler values 0.5, 0.5, 0.001 
         uncs = np.array([self.aot_unc, self.water_unc, self.ozone_unc])[...,None]
@@ -113,8 +122,12 @@ class atmo_cor(object):
         else:
             J = 0.5 * (self.flat_atmos - self.flat_prior)**2/uncs**2
             full_dJ = (self.flat_atmos - self.flat_prior)/uncs**2
-        J_ = np.array(full_dJ).sum(axis=(1,))
-        J  = np.array(J).sum()
+        if is_full:
+            J_ = np.array(full_dJ)
+        else:
+            J_ = np.array(full_dJ).sum(axis=(1,))
+
+        J = np.array(J).sum()
         return J, J_
 
     def smooth_cost(self,):
@@ -124,6 +137,41 @@ class atmo_cor(object):
         J  = 0
         J_ = np.array([0,0,0])
         return J, J_
+    def optimization(self,):
+        '''
+        An optimization function used for the retrieval of atmospheric parameters
+        '''        
+        p0     = 0.2, 3.4, 0.5 
+        psolve1 = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint=1, bounds=self.bounds,fprime=None)
+        psolve2 = optimize.fmin(self.fmin_cost, p0, full_output=True, maxiter=100, maxfun=150, disp=0)
+        return psolve1, psolve2
+ 
+    def fmin_l_bfgs_cost(self,p):
+
+        self.atmosphere     = np.ones(self.toa.shape[-2:])*np.array(p)[..., None, None]
+
+        obs_J, obs_J_       = self.obs_cost()
+        prior_J, prior_J_   = self.prior_cost()
+        smooth_J, smooth_J_ = self.smooth_cost()
+
+        J = obs_J + prior_J + smooth_J
+        J_ = obs_J_ +  prior_J_ + smooth_J_
+
+        return J, J_
+
+    def fmin_cost(self,p):
+
+        self.atmosphere     = np.ones(self.toa.shape[-2:])*np.array(p)[..., None, None]
+
+        obs_J, obs_J_       = self.obs_cost()
+        prior_J, prior_J_   = self.prior_cost()
+        smooth_J, smooth_J_ = self.smooth_cost()
+
+        J = obs_J + prior_J + smooth_J
+        J_ = obs_J_ +  prior_J_ + smooth_J_
+
+        return J
+
 
 
 if __name__ == "__main__":
@@ -141,7 +189,10 @@ if __name__ == "__main__":
     boa_qa = np.random.choice([0,1,255], size=(4,100,100))
     mask,prior = np.zeros((100, 100)).astype(bool), [0.2, 3, 0.3]
     mask[:50,:50] = True
-    atom = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, toa,atmosphere,0.5,0.5,10,10,0.5, boa_qa, boa_bands=[645,869,469,555], band_indexs=[3,7,1,2], mask=mask, prior=prior)
+    atom = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
+                     toa,atmosphere,0.5,0.5,10,10,0.5, boa_qa, boa_bands=[645,869,469,555], \
+                     band_indexs=[3,7,1,2], mask=mask, prior=prior)
+
     atom._load_emus()
     atom._load_unc()
     atom._sort_emus_inputs()
@@ -150,3 +201,8 @@ if __name__ == "__main__":
     smooth_J, smooth_J_ = atom.smooth_cost()
     J = obs_J + prior_J + smooth_J
     J_ = obs_J_ +  prior_J_ + smooth_J_
+    
+    print atom.fmin_l_bfgs_cost([0.3, 3.2, 0.4],)
+    print atom.fmin_l_bfgs_cost([0.25, 3.2, 0.4],)
+    atom.optimization()
+

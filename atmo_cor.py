@@ -65,25 +65,25 @@ class atmo_cor(object):
         assert self.boa.shape[-2:] == self.atmosphere.shape[-2:], 'boa and atmosphere should have the same shape in the last two axises.'
         # make the boa and toa to be the shape of nbands * nsample
         # and apply the flattened mask and subsample 
-        flat_mask    = self.mask.flatten()
-        flat_boa     = self.boa.reshape(self.boa.shape[0], -1)[...,flat_mask][...,self.subsample_sta::self.subsample]
-        flat_toa     = self.toa.reshape(self.toa.shape[0], -1)[...,flat_mask][...,self.subsample_sta::self.subsample]
-        flat_boa_unc = self.boa_unc.reshape(self.toa.shape[0], -1)[...,flat_mask][...,self.subsample_sta::self.subsample]
-        flat_atmos   = self.atmosphere.reshape(3, -1)[...,flat_mask][...,self.subsample_sta::self.subsample]
+        flat_mask    = self.mask.flatten()[self.subsample_sta::self.subsample]
+        flat_boa     = self.boa.reshape(self.boa.shape[0], -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
+        flat_toa     = self.toa.reshape(self.toa.shape[0], -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
+        flat_boa_unc = self.boa_unc.reshape(self.toa.shape[0], -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
+        flat_atmos   = self.atmosphere.reshape(3, -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
         flat_angs_ele = []
         for i in [self.sza, self.vza, self.saa, self.vaa, self.elevation]:
             if isinstance(i, (float,int)):
                 flat_angs_ele.append(i)
             else:
                 assert i.shape == self.boa.shape[-2:], 'i should have the same shape as the last two axises of boa.'
-                flat_i = i.flatten()[flat_mask][self.subsample_sta::self.subsample]
+                flat_i = i.flatten()[self.subsample_sta::self.subsample][flat_mask]
                 flat_angs_ele.append(flat_i)
         ## for the prior
         if np.array(self.prior).ndim == 1:
             self.flat_prior = np.array(self.prior) 
         else:
             assert self.prior.shape == self.boa.shape[-2:], 'prior should have the same shape as the last two axises of boa.'
-            self.flat_prior = self.prior.reshape(3, -1)[...,flat_mask][...,self.subsample_sta::self.subsample]
+            self.flat_prior = self.prior.reshape(3, -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
         self.flat_atmos = flat_atmos
 
         return flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, flat_angs_ele # [sza, vza, saa, vaa, elevation]        
@@ -104,11 +104,19 @@ class atmo_cor(object):
         return J, J_
 
     def prior_cost(self,):
-        J = [0.5 * (self.flat_atmos - self.flat_prior[...,None])**2/unc**2 for unc in (self.aot_unc, self.water_unc, self.ozone_unc)]
-        full_dJ = [(self.flat_atmos - self.flat_prior[...,None])/unc**2 for unc in (self.aot_unc, self.water_unc, self.ozone_unc)]
-        J_ = np.array(full_dJ).sum(axis=(1,2))
+        # maybe need to update to per pixel basis uncertainty 
+        # instead of using scaler values 0.5, 0.5, 0.001 
+        uncs = np.array([self.aot_unc, self.water_unc, self.ozone_unc])[...,None]
+        if self.flat_prior.ndim == 1:
+            J = 0.5 * (self.flat_atmos - self.flat_prior[...,None])**2/uncs**2
+            full_dJ = (self.flat_atmos - self.flat_prior[...,None])/uncs**2
+        else:
+            J = 0.5 * (self.flat_atmos - self.flat_prior)**2/uncs**2
+            full_dJ = (self.flat_atmos - self.flat_prior)/uncs**2
+        J_ = np.array(full_dJ).sum(axis=(1,))
         J  = np.array(J).sum()
         return J, J_
+
     def smooth_cost(self,):
         '''
         need to add first order regulization

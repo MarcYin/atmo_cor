@@ -150,8 +150,8 @@ class atmo_cor(object):
         '''        
         p0     = 0.2, 3.4, 0.5 
         psolve1 = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint=1, bounds=self.bounds,fprime=None)
-        psolve2 = optimize.fmin(self.fmin_cost, p0, full_output=True, maxiter=100, maxfun=150, disp=0)
-        return psolve1, psolve2
+        #psolve2 = optimize.fmin(self.fmin_cost, p0, full_output=True, maxiter=100, maxfun=150, disp=0)
+        return psolve1#, psolve2
  
     def fmin_l_bfgs_cost(self,p):
 

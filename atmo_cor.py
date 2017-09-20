@@ -2,9 +2,6 @@
 import numpy as np
 import sys
 sys.path.insert(0, 'python')
-from multiprocessing import pool
-import cPickle as pkl
-from functools import partial
 from emulation_engine import AtmosphericEmulationEngine
 from grab_uncertainty import grab_uncertainty
 from scipy import optimize 
@@ -17,14 +14,14 @@ class atmo_cor(object):
     def __init__(self, sensor,
                        emus_dir,
                        boa,toa, 
-                       atmosphere, 
                        sza, vza,
                        saa, vaa, 
                        elevation,
                        boa_qa, boa_bands,
                        band_indexs, 
                        mask,prior,
-                       subsample = None,
+                       atmosphere = None, 
+                       subsample  = None,
                        subsample_start = 0,
                        gradient_refl=True, 
                        bands=None):
@@ -67,15 +64,21 @@ class atmo_cor(object):
         assert self.boa.shape[-2:] == self.mask.shape, 'mask should have the same shape as the last two axises of boa.'
         assert self.boa.shape      == self.toa.shape, 'toa and boa should have the same shape.'
         assert self.boa.shape      == self.boa_unc.shape, 'boa and boa_unc should have the same shape.'
-        assert self.atmosphere.shape[0] == 3, 'Three parameters, i.e. AOT, water and Ozone are needed.'
-        assert self.boa.shape[-2:] == self.atmosphere.shape[-2:], 'boa and atmosphere should have the same shape in the last two axises.'
+        if self.atmosphere is not None:
+            assert self.atmosphere.shape[0] == 3, 'Three parameters, i.e. AOT, water and Ozone are needed.'
+            assert self.boa.shape[-2:] == self.atmosphere.shape[-2:], 'boa and atmosphere should have the same shape in the last two axises.'
         # make the boa and toa to be the shape of nbands * nsample
         # and apply the flattened mask and subsample 
         flat_mask    = self.mask.flatten()[self.subsample_sta::self.subsample]
         flat_boa     = self.boa.reshape(self.boa.shape[0], -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
         flat_toa     = self.toa.reshape(self.toa.shape[0], -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
         flat_boa_unc = self.boa_unc.reshape(self.toa.shape[0], -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
-        flat_atmos   = self.atmosphere.reshape(3, -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
+        if self.atmosphere is not None:
+            flat_atmos = self.atmosphere.reshape(3, -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
+            self.flat_atmos = flat_atmos
+        else:
+            flat_atmos = np.array([])
+            self.flat_atmos = flat_atmos   
         flat_angs_ele = []
         for i in [self.sza, self.vza, self.saa, self.vaa, self.elevation]:
             if isinstance(i, (float,int)):
@@ -90,13 +93,15 @@ class atmo_cor(object):
         else:
             assert self.prior.shape == self.boa.shape[-2:], 'prior should have the same shape as the last two axises of boa.'
             self.flat_prior = self.prior.reshape(3, -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
-        self.flat_atmos = flat_atmos
 
-        return flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, flat_angs_ele # [sza, vza, saa, vaa, elevation]        
+        return flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, flat_angs_ele# [sza, vza, saa, vaa, elevation]        
 
     def obs_cost(self,is_full=False):
 
         flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, [sza, vza, saa, vaa, elevation] = self._sort_emus_inputs()
+        for i in [flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, sza, vza, saa, vaa, elevation]:
+            if np.array(i).size == 0:
+                return 0, np.array([0,0,0]) # any empty array result in earlier leaving the estimation
         H0, dH = self.AEE.emulator_reflectance_atmosphere(flat_boa, flat_atmos, sza, vza, saa, vaa, elevation, bands=self.band_indexs)
         H0, dH = np.array(H0), np.array(dH)
         diff = (flat_toa - H0) #[..., None] dd an extra dimentiaon to match the dH 
@@ -116,6 +121,8 @@ class atmo_cor(object):
         # maybe need to update to per pixel basis uncertainty 
         # instead of using scaler values 0.5, 0.5, 0.001 
         uncs = np.array([self.aot_unc, self.water_unc, self.ozone_unc])[...,None]
+        if self.flat_atmos.size == 0:
+            return 0, np.array([0,0,0])
         if self.flat_prior.ndim == 1:
             J = 0.5 * (self.flat_atmos - self.flat_prior[...,None])**2/uncs**2
             full_dJ = (self.flat_atmos - self.flat_prior[...,None])/uncs**2
@@ -190,8 +197,8 @@ if __name__ == "__main__":
     mask,prior = np.zeros((100, 100)).astype(bool), [0.2, 3, 0.3]
     mask[:50,:50] = True
     atom = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
-                     toa,atmosphere,0.5,0.5,10,10,0.5, boa_qa, boa_bands=[645,869,469,555], \
-                     band_indexs=[3,7,1,2], mask=mask, prior=prior)
+                     toa,0.5,0.5,10,10,0.5, boa_qa, boa_bands=[645,869,469,555], \
+                     band_indexs=[3,7,1,2], mask=mask, prior=prior, atmosphere=atmosphere)
 
     atom._load_emus()
     atom._load_unc()

@@ -47,7 +47,8 @@ class prepare_modis(object):
         self.s2_tile     = s2_tile
         self.l8_tile     = l8_tile
         self.s2_psf      = [26, 39, -9.7, 38, 41]
-        
+        self.s2_bands    = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A'
+
     def modis_aerosol(self, save_file=False):
         mcd43_tmp       = '%s/MCD43A1.A%d%03d.h%02dv%02d.006.*.hdf'
         self.mcd43_file = glob(mcd43_tmp%(self.mcd43_dir,\
@@ -69,7 +70,38 @@ class prepare_modis(object):
             self.toa_mask     = np.all(np.isfinite(modis_toa), axis=0)
             self.mask         = self.quality_mask & self.valid_mask & self.toa_mask & (~self.modis_cloud)
             self.patch_mask   = np.zeros_like(self.mask).astype(bool)
-            
+            i,j = 3,3
+            self.patch_mask[i*100:(i+1)*100,j*100:(j+1)*100] = True        
+            boa, toa  = self.modis_boa[:,self.patch_mask].reshape(7,100, 100), modis_toa[:,self.patch_mask].reshape(7,100, 100)
+	    vza, sza  = np.cos(modis_angle[:2, self.patch_mask]).reshape(2,100, 100)
+	    vaa, saa  =        modis_angle[2:, self.patch_mask].reshape(2,100, 100)
+	    boa_qa    = self.qa[:,self.patch_mask].reshape(7,100,100)
+	    mask      = self.mask[self.patch_mask].reshape(100, 100)
+	    prior     = 0.2, 3.4, 0.35
+	    aot       = np.zeros((100, 100)) 
+	    water     = aot.copy()
+	    ozone     =  aot.copy()
+	    aot[:]=0.2; water[:] = 3.4; ozone[:] = 0.35
+	    atmosphere= np.array([aot, water, ozone])
+	    self.atom = atmo_cor('TERRA', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
+			toa,sza,vza,saa,vaa,0.5, boa_qa, boa_bands=[645,869,469,555,1240,1640,2130], \
+			band_indexs=[0,1,2,3,4,5,6], mask=mask, prior=prior, atmosphere = atmosphere, subsample=10)
+	    self.atom._load_unc()
+	    
+	    if t==0:
+		self.atom._load_emus()
+		self.AEE    = self.atom.AEE
+		self.bounds = self.atom.bounds
+	    else:
+		self.atom.AEE    = self.AEE
+		self.atom.bounds =  self.bounds
+
+            if mask.sum() > 0:
+                break
+            else:
+                continue
+
+            '''
             for i in range(24):
                 for j in range(24):
                     self.patch_mask   = np.zeros_like(self.mask).astype(bool)
@@ -102,17 +134,29 @@ class prepare_modis(object):
 			pass
 		    else:
 			solved.append([t,i,j, self.atom.optimization()])
+        
         return solved
+        '''
 
     def S2_aerosol(self,):
 
         self.s2_file_dir = os.path.join(self.s2_toa_dir, self.s2_tile[:-3],\
                                         self.s2_tile[-3], self.s2_tile[-2:],\
                                         str(self.year), str(self.month), str(self.day)) 
-        print self.s2_file_dir
+
+        # open the created vrt file with 10 meter, 20 meter and 60 meter 
+        # grouped togehter and use gdal memory map to open it
+        g = gdal.Open('/'.join(self.s2_file_dir+'10meter.vrt'))
+        data= g.GetVirtualMemArray()
+        b2,b3,b4,b8 = data
+        g1 = gdal.Open('/'.join(self.s2_dir+'20meter.vrt'))
+        data1 = g1.GetVirtualMemArray()
+        b8a, b11, b12 = data1[-3:,:,:]
+        img = dict(zip(self.s2_bands, [b2,b3,b4,b8, b11, b12, b8a])) 
+
         
-     
+
 if __name__ == "__main__":
     pre_mod = prepare_modis(11,4,2006, 200)
-    pre_mod.S2_aerosol()
+    #pre_mod.S2_aerosol()
     solved  = pre_mod.modis_aerosol()

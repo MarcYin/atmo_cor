@@ -108,8 +108,8 @@ class atmo_cor(object):
         correction_mask = np.isfinite(diff).all(axis=0)
         diff[:,~correction_mask] = 0.
         dH[:,~correction_mask,:] = 0.
-        J  = (0.5 * self.band_weights[...,None] * diff**2 / flat_boa_unc**2).sum(axis=(0,1))
-        full_dJ = [ self.band_weights[...,None] * dH[:,:,i] * diff/flat_boa_unc**2 for i in xrange(4,7)]
+        J  = (0.5 * self.band_weights[...,None] * diff**2 / (self.band_weights[...,None].sum() * flat_boa_unc**2)).sum(axis=(0,1))
+        full_dJ = [ self.band_weights[...,None] * dH[:,:,i] * diff/(self.band_weights[...,None].sum() * flat_boa_unc**2) for i in xrange(4,7)]
         if is_full:
             J_ = np.array(full_dJ).sum(axis=(1,))
         else:
@@ -196,20 +196,20 @@ if __name__ == "__main__":
     boa_qa = np.random.choice([0,1,255], size=(4,100,100))
     mask,prior = np.zeros((100, 100)).astype(bool), [0.2, 3, 0.3]
     mask[:50,:50] = True
-    atom = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
+    atmo = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
                      toa,0.5,0.5,10,10,0.5, boa_qa, boa_bands=[645,869,469,555], \
                      band_indexs=[3,7,1,2], mask=mask, prior=prior, atmosphere=atmosphere)
 
-    atom._load_emus()
-    atom._load_unc()
-    atom._sort_emus_inputs()
-    obs_J, obs_J_ = atom.obs_cost()
-    prior_J, prior_J_ = atom.prior_cost()
-    smooth_J, smooth_J_ = atom.smooth_cost()
+    atmo._load_emus()
+    atmo._load_unc()
+    atmo._sort_emus_inputs()
+    obs_J, obs_J_ = atmo.obs_cost()
+    prior_J, prior_J_ = atmo.prior_cost()
+    smooth_J, smooth_J_ = atmo.smooth_cost()
     J = obs_J + prior_J + smooth_J
     J_ = obs_J_ +  prior_J_ + smooth_J_
     
-    print atom.fmin_l_bfgs_cost([0.3, 3.2, 0.4],)
-    print atom.fmin_l_bfgs_cost([0.25, 3.2, 0.4],)
-    atom.optimization()
+    print atmo.fmin_l_bfgs_cost([0.3, 3.2, 0.4],)
+    print atmo.fmin_l_bfgs_cost([0.25, 3.2, 0.4],)
+    atmo.optimization()
 

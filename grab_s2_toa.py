@@ -8,6 +8,7 @@ from glob import glob
 import sys
 sys.path.insert(0, '/data/store01/data_dirs/students/ucfafyi/Multiply/Aeronet/python')
 from cloud import classification
+import subprocess
 
 def read_s2_band(fname):
         g = gdal.Open(fname)
@@ -108,8 +109,9 @@ class read_s2(object):
             self.cloud = cloud = gdal.Open(self.s2_file_dir+'/cloud.tiff').ReadAsArray().astype(bool)
         self.cloud_cover = 1.*self.cloud.sum()/self.cloud.size
 
-    def get_s2_angles(self,):
-	bands = 'B01', 'B02', 'B03','B04','B05' ,'B06', 'B07', 'B08', 'B8A', 'B09', 'B10', 'B11', 'B12' 
+    def get_s2_angles(self,reconstruct = True):
+
+
 	tree = ET.parse(self.s2_file_dir+'/metadata.xml')
 	root = tree.getroot()
 	#Sun_Angles_Grid
@@ -178,39 +180,52 @@ class read_s2(object):
 	    bands_vaa.append(band_vaa)
 	    bands_vza.append(band_vza)
 	bands_vaa, bands_vza = np.array(bands_vaa), np.array(bands_vza)
-        vaa  = {}; vza  = {}
-        mva_ = {}; mvz_ = {}
-        for i, band in enumerate(self.s2_bands):
-            vaa[band]  = bands_vaa[i]
-            vza[band]  = bands_vza[i]
-            mva_[band] = mva[i]
-            mvz_[band] = mvz[i]               
+	vaa  = {}; vza  = {}
+	mva_ = {}; mvz_ = {}
+	for i, band in enumerate(self.s2_bands):
+	    vaa[band]  = bands_vaa[i]
+	    vza[band]  = bands_vza[i]
+	    mva_[band] = mva[i]
+	    mvz_[band] = mvz[i]               
 
-        if self.bands is not None:
-            self.vza = {}; self.vaa = {}
-            self.mvz = {}; self.mva = {}
-            for band in self.bands:
-                self.vza[band] = vza[band]
-                self.vaa[band] = vaa[band]
-                self.mvz[band] = mvz_[band]
-                self.mva[band] = mva_[band]
-            self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
+	if self.bands is None:
+            bands = self.s2_bands
         else:
-            self.vza = vza
-            self.vaa = vaa
-            self.mvz = mvz_
-            self.mva = mva_
-            self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa, 'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
+            bands = self.bands
+	self.vza = {}; self.vaa = {}
+	self.mvz = {}; self.mva = {}
+	for band in bands:
+	    self.vza[band] = vza[band]
+	    self.vaa[band] = vaa[band]
+	    self.mvz[band] = mvz_[band]
+	    self.mva[band] = mva_[band]
+	self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
 
+        if reconstruct:
+            if len(glob(self.s2_file_dir + '/angles/VAA_VZA_*.img')) == 13:
+                pass
+            else:
+                print 'Reconstructing Sentinel 2 angles...'
+                subprocess.call(['python', './python/s2a_angle_bands_mod.py', self.s2_file_dir+'/metadata.xml',  '1'])
 
+	    if self.bands is None:
+		bands = self.s2_bands
+	    else:
+		bands = self.bands
+
+            self.vaa = {}; self.vza = {}
+	    for band in bands:
+		g = gdal.Open(self.s2_file_dir + '/angles/VAA_VZA_%s.img'%band)
+                VAA, VZA = g.GetRasterBand(1), g.GetRasterBand(2)
+                self.vaa[band] = VAA 
+                self.vza[band] = VZA
+            self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
 
 if __name__ == '__main__':
     s2 = read_s2('/home/ucfafyi/DATA/S2_MODIS/s_data/', '18HXE', 2016, 5, 17, bands = ['B02', 'B03', 'B04', 'B08', 'B11'] )
     s2.selected_img = s2.get_s2_toa() 
     s2.get_s2_cloud()
     s2.get_s2_angles()
-
-
 
 
 

@@ -10,7 +10,7 @@ import numpy as np
 from atmo_cor import atmo_cor
 import datetime
 
-class prepare_modis(object):
+class solve_aerosol(object):
     '''
     Prepareing modis data to be able to pass into 
     atmo_cor for the retrieval of atmospheric parameters.
@@ -47,7 +47,7 @@ class prepare_modis(object):
         self.s2_tile     = s2_tile
         self.l8_tile     = l8_tile
         self.s2_psf      = [26, 39, -9.7, 38, 41]
-        self.s2_bands    = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A'
+        self.s2_u_bands  = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A' #bands used for the atmo-cor
 
     def modis_aerosol(self, save_file=False):
         mcd43_tmp       = '%s/MCD43A1.A%d%03d.h%02dv%02d.006.*.hdf'
@@ -70,7 +70,7 @@ class prepare_modis(object):
             self.toa_mask     = np.all(np.isfinite(modis_toa), axis=0)
             self.mask         = self.quality_mask & self.valid_mask & self.toa_mask & (~self.modis_cloud)
             self.patch_mask   = np.zeros_like(self.mask).astype(bool)
-            i,j = 3,3
+            i,j = 15,18
             self.patch_mask[i*100:(i+1)*100,j*100:(j+1)*100] = True        
             boa, toa  = self.modis_boa[:,self.patch_mask].reshape(7,100, 100), modis_toa[:,self.patch_mask].reshape(7,100, 100)
 	    vza, sza  = np.cos(modis_angle[:2, self.patch_mask]).reshape(2,100, 100)
@@ -83,18 +83,18 @@ class prepare_modis(object):
 	    ozone     =  aot.copy()
 	    aot[:]=0.2; water[:] = 3.4; ozone[:] = 0.35
 	    atmosphere= np.array([aot, water, ozone])
-	    self.atom = atmo_cor('TERRA', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
+	    self.atmo = atmo_cor('TERRA', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
 			toa,sza,vza,saa,vaa,0.5, boa_qa, boa_bands=[645,869,469,555,1240,1640,2130], \
 			band_indexs=[0,1,2,3,4,5,6], mask=mask, prior=prior, atmosphere = atmosphere, subsample=10)
-	    self.atom._load_unc()
+	    self.atmo._load_unc()
 	    
 	    if t==0:
-		self.atom._load_emus()
-		self.AEE    = self.atom.AEE
-		self.bounds = self.atom.bounds
+		self.atmo._load_emus()
+		self.AEE    = self.atmo.AEE
+		self.bounds = self.atmo.bounds
 	    else:
-		self.atom.AEE    = self.AEE
-		self.atom.bounds =  self.bounds
+		self.atmo.AEE    = self.AEE
+		self.atmo.bounds =  self.bounds
 
             if mask.sum() > 0:
                 break
@@ -118,45 +118,70 @@ class prepare_modis(object):
 		    ozone     =  aot.copy()
 		    aot[:]=0.2; water[:] = 3.4; ozone[:] = 0.35
 		    atmosphere= np.array([aot, water, ozone])
-		    self.atom = atmo_cor('TERRA', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
+		    self.atmo = atmo_cor('TERRA', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
 				toa,sza,vza,saa,vaa,0.5, boa_qa, boa_bands=[645,869,469,555,1240,1640,2130], \
 				band_indexs=[0,1,2,3,4,5,6], mask=mask, prior=prior, atmosphere = atmosphere, subsample=10)
-                    self.atom._load_unc()
+                    self.atmo._load_unc()
 		    
                     if t==0:
-			self.atom._load_emus()
-			self.AEE    = self.atom.AEE
-			self.bounds = self.atom.bounds
+			self.atmo._load_emus()
+			self.AEE    = self.atmo.AEE
+			self.bounds = self.atmo.bounds
 		    else:
-			self.atom.AEE    = self.AEE
-			self.atom.bounds =  self.bounds
+			self.atmo.AEE    = self.AEE
+			self.atmo.bounds =  self.bounds
 		    if mask.sum() == 0:
 			pass
 		    else:
-			solved.append([t,i,j, self.atom.optimization()])
+			solved.append([t,i,j, self.atmo.optimization()])
         
         return solved
         '''
+    def repeat_extend(self,data, shape=(10980, 10980)):
+        da_shape = data.shape
+        re_x, re_y = int(1.*shape[0]/da_shape[0]), int(1.*shape[1]/da_shape[1])
+        new_data = np.zeros(shape)
+        new_data[:re_x*da_shape[0], :re_y*da_shape[1]] = np.repeat(np.repeat(data, re_x,axis=0), re_y, axis=1)
+        return new_data
+        
+    
+    def s2_aerosol(self,):
 
-    def S2_aerosol(self,):
+        self.s2 = read_s2(self.s2_toa_dir, self.s2_tile, self.year, self.month, self.day, self.s2_u_bands)
+	self.s2.selected_img = self.s2.get_s2_toa() 
+	self.s2.get_s2_cloud()
+        self.s2_get_angles()
+        tiles = Find_corresponding_pixels(self.s2_dir+'B04.jp2', destination_res=500) 
+        self.H_inds, self.L_inds = tiles['h%02dv%02d'%(self.h, self.v)]
+	self.Lx, self.Ly = self.L_inds
+	self.Hx, self.Hy = self.H_inds
+        xs, ys = self.s2_psf[-2], self.s2_psf[-1]
+        # apply psf shifts without go out of the image extend  
+        shifted_mask = np.logical_and.reduce(((psf.Hx+int(xs)>=0),
+                                              (psf.Hx+int(xs)<10980), 
+                                              (psf.Hy+int(ys)>=0),
+                                              (psf.Hy+int(ys)<10980)))
+        
+        SZA, SAA = self.s2.angles['sza'], self.s2.angles['saa']
+        full_resolution = self.s2.selected_img['B04'].shape[0]
+        self.s2_toa = np.zeros((7,len(self.Hx), len(self.Hy)))
+        for i, band in enumerate(self.s2_u_bands):
+            if band in ['B8A', 'B11', 'B12']:
+                img = self.repeat_extend(self.selected_img[band], shape = (10980,10980))
+            else:
+                img = self.selected_img[band]
+            
 
-        self.s2_file_dir = os.path.join(self.s2_toa_dir, self.s2_tile[:-3],\
-                                        self.s2_tile[-3], self.s2_tile[-2:],\
-                                        str(self.year), str(self.month), str(self.day)) 
-
-        # open the created vrt file with 10 meter, 20 meter and 60 meter 
-        # grouped togehter and use gdal memory map to open it
-        g = gdal.Open('/'.join(self.s2_file_dir+'10meter.vrt'))
-        data= g.GetVirtualMemArray()
-        b2,b3,b4,b8 = data
-        g1 = gdal.Open('/'.join(self.s2_dir+'20meter.vrt'))
-        data1 = g1.GetVirtualMemArray()
-        b8a, b11, b12 = data1[-3:,:,:]
-        img = dict(zip(self.s2_bands, [b2,b3,b4,b8, b11, b12, b8a])) 
-
+            
+        self.s2_angles = np.zeros((4, 10980, 10980))
+        for i, angle in enumerate (['vza', 'sza', 'vaa', 'saa']):
+            if angle in ['sza', 'saa']:
+                self.s2_angles[i] = self.repeat_extend(self.s2.angles[angle], shape =(10980, 10980))
+            
+        sza = self.repeat_extend(sza, shape = (10980, 10980))
         
 
 if __name__ == "__main__":
-    pre_mod = prepare_modis(11,4,2006, 200)
-    #pre_mod.S2_aerosol()
-    solved  = pre_mod.modis_aerosol()
+    aero = solve_aerosol(11,4,2006, 200)
+    #aero.s2_aerosol()
+    solved  = aero.modis_aerosol()

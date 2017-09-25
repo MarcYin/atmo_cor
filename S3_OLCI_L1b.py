@@ -14,7 +14,7 @@ OLCI_granule = namedtuple("OLCI_granule", "mask sza saa vza vaa " +
                         "b1 b2 b3 b4 b5 b6 b7 b8 b9 b10 b11 b12 "+
                         "b13 b14 b15 b16 b17 b18 b19 b20 b21")
 
-class OLCI_toa_refl(object):
+class OLCI_L1b_reader(object):
 
     def __init__ (self, tile, olci_path):
         "A class to read out OLCI data"""
@@ -59,12 +59,12 @@ class OLCI_toa_refl(object):
         if len(granules) == 0:
             raise ValueError("No OLCI granules found")
         
-        self.olci_granules = {}
+        self.granules = {}
         for granule in granules:
             this_date, this_data = self._process_fname(granule)
-            self.olci_granules[this_date] = this_data
+            self.granules[this_date] = this_data
 
             
 if __name__ == "__main__":
-    OLCI = OLCI_toa_refl("h17v05", "/storage/ucfajlg/Ujia/S3_test/OLCI")
+    OLCI = OLCI_L1b_reader("h17v05", "/storage/ucfajlg/Ujia/S3_test/OLCI")
     

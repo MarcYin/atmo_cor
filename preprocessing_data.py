@@ -9,6 +9,10 @@ from get_brdf import get_brdf_six
 import numpy as np
 from atmo_cor import atmo_cor
 import datetime
+from scipy import signal, ndimage
+from grab_s2_toa import read_s2
+from spatial_mapping import Find_corresponding_pixels, cloud_dilation
+
 
 class solve_aerosol(object):
     '''
@@ -28,7 +32,8 @@ class solve_aerosol(object):
                  qa_thresh   = 255,
                  mod_cloud   = None,
                  verbose     = True,
-                 save_file   = False):
+                 save_file   = False,
+                 reconstruct_s2_angle = True):
 
         self.year        = year 
         self.doy         = doy
@@ -48,24 +53,26 @@ class solve_aerosol(object):
         self.l8_tile     = l8_tile
         self.s2_psf      = [26, 39, -9.7, 38, 41]
         self.s2_u_bands  = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A' #bands used for the atmo-cor
+        self.s2_full_res = (10980, 10980)
+        self.reconstruct_s2_angle = reconstruct_s2_angle
 
-    def modis_aerosol(self, save_file=False):
         mcd43_tmp       = '%s/MCD43A1.A%d%03d.h%02dv%02d.006.*.hdf'
         self.mcd43_file = glob(mcd43_tmp%(self.mcd43_dir,\
                                 self.year, self.doy, self.h, self.v))[0]
+    def modis_aerosol(self, save_file=False):
 
         self.modis_toa, self.modis_angles = grab_modis_toa(year=2006,doy=200,verbose=True,\
                                                            mcd43file = self.mcd43_file, directory_l1b= self.mod_l1b_dir)
         solved = []
         for t, modis_toa in enumerate( self.modis_toa):
             modis_angle = self.modis_angles[t]
-            self.modis_boa, self.qa = get_brdf_six(self.mcd43_file, (modis_angle[0],\
-                                                   modis_angle[1], modis_angle[2] - modis_angle[3]),\
-                                                   bands=[1,2,3,4,5,6,7], flag=None, Linds= None)
+            self.modis_boa, self.modis_boa_qa = get_brdf_six(self.mcd43_file, (modis_angle[0],\
+                                                             modis_angle[1], modis_angle[2] - modis_angle[3]),\
+                                                             bands=[1,2,3,4,5,6,7], flag=None, Linds= None)
             if self.mod_cloud is None:
                 self.modis_cloud = np.zeros_like(modis_toa[0]).astype(bool)
 
-            self.quality_mask = np.all(self.qa <= self.qa_thresh, axis =0) 
+            self.quality_mask = np.all(self.modis_boa_qa <= self.qa_thresh, axis =0) 
             self.valid_mask   = np.all(~self.modis_boa.mask, axis = 0)
             self.toa_mask     = np.all(np.isfinite(modis_toa), axis=0)
             self.mask         = self.quality_mask & self.valid_mask & self.toa_mask & (~self.modis_cloud)
@@ -138,50 +145,122 @@ class solve_aerosol(object):
         return solved
         '''
     def repeat_extend(self,data, shape=(10980, 10980)):
-        da_shape = data.shape
-        re_x, re_y = int(1.*shape[0]/da_shape[0]), int(1.*shape[1]/da_shape[1])
-        new_data = np.zeros(shape)
+        da_shape    = data.shape
+        re_x, re_y  = int(1.*shape[0]/da_shape[0]), int(1.*shape[1]/da_shape[1])
+        new_data    = np.zeros(shape)
+        new_data[:] = -9999
         new_data[:re_x*da_shape[0], :re_y*da_shape[1]] = np.repeat(np.repeat(data, re_x,axis=0), re_y, axis=1)
         return new_data
         
+    def gaussian(self, xstd, ystd, angle, norm = True):
+        win = 2*int(round(max(1.96*xstd, 1.96*ystd)))
+        winx = int(round(win*(2**0.5)))
+        winy = int(round(win*(2**0.5)))
+        xgaus = signal.gaussian(winx, xstd)
+        ygaus = signal.gaussian(winy, ystd)
+        gaus  = np.outer(xgaus, ygaus)
+        r_gaus = ndimage.interpolation.rotate(gaus, angle, reshape=True)
+        center = np.array(r_gaus.shape)/2
+        cgaus = r_gaus[center[0]-win/2: center[0]+win/2, center[1]-win/2:center[1]+win/2]
+        if norm:
+            return cgaus/cgaus.sum()
+        else:
+            return cgaus 
     
     def s2_aerosol(self,):
 
         self.s2 = read_s2(self.s2_toa_dir, self.s2_tile, self.year, self.month, self.day, self.s2_u_bands)
-	self.s2.selected_img = self.s2.get_s2_toa() 
+	selected_img = self.s2.get_s2_toa() 
 	self.s2.get_s2_cloud()
-        self.s2_get_angles()
-        tiles = Find_corresponding_pixels(self.s2_dir+'B04.jp2', destination_res=500) 
+        
+        # find corresponding pixels between s2 and modis
+        tiles = Find_corresponding_pixels(self.s2.s2_file_dir+'/B04.jp2', destination_res=500) 
         self.H_inds, self.L_inds = tiles['h%02dv%02d'%(self.h, self.v)]
 	self.Lx, self.Ly = self.L_inds
 	self.Hx, self.Hy = self.H_inds
-        xs, ys = self.s2_psf[-2], self.s2_psf[-1]
-        # apply psf shifts without go out of the image extend  
-        shifted_mask = np.logical_and.reduce(((psf.Hx+int(xs)>=0),
-                                              (psf.Hx+int(xs)<10980), 
-                                              (psf.Hy+int(ys)>=0),
-                                              (psf.Hy+int(ys)<10980)))
-        
-        SZA, SAA = self.s2.angles['sza'], self.s2.angles['saa']
-        full_resolution = self.s2.selected_img['B04'].shape[0]
-        self.s2_toa = np.zeros((7,len(self.Hx), len(self.Hy)))
-        for i, band in enumerate(self.s2_u_bands):
-            if band in ['B8A', 'B11', 'B12']:
-                img = self.repeat_extend(self.selected_img[band], shape = (10980,10980))
-            else:
-                img = self.selected_img[band]
-            
 
-            
-        self.s2_angles = np.zeros((4, 10980, 10980))
-        for i, angle in enumerate (['vza', 'sza', 'vaa', 'saa']):
-            if angle in ['sza', 'saa']:
-                self.s2_angles[i] = self.repeat_extend(self.s2.angles[angle], shape =(10980, 10980))
-            
-        sza = self.repeat_extend(sza, shape = (10980, 10980))
+        # get the psf parameters
+        xstd, ystd, ang, xs, ys = self.s2_psf
+
+        # apply psf shifts without go out of the image extend  
+        shifted_mask = np.logical_and.reduce(((self.Hx+int(xs)>=0),
+                                              (self.Hx+int(xs)<self.s2_full_res[0]), 
+                                              (self.Hy+int(ys)>=0),
+                                              (self.Hy+int(ys)<self.s2_full_res[0])))
         
+        self.Hx, self.Hy = self.Hx[shifted_mask], self.Hy[shifted_mask]
+        self.Lx, self.Ly = self.Lx[shifted_mask], self.Ly[shifted_mask]
+        
+        # get the convolved toa reflectance
+        self.valid_pixs = sum(shifted_mask) # count how many pixels is still within the s2 tile 
+        self.s2_toa = np.zeros((7, self.valid_pixs))
+        ker         = self.gaussian(xstd, ystd, ang) 
+        ker_size = 2*int(round(max(1.96*xstd, 1.96*ystd)))
+        self.bad_pixs = np.zeros(self.valid_pixs).astype(bool)
+        for i, band in enumerate(self.s2_u_bands):
+            if selected_img[band].shape != self.s2_full_res:
+                img = self.repeat_extend(selected_img[band], shape = self.s2_full_res)
+            else:
+                img = selected_img[band]
+            img[0,:] = img[-1,:] = img[:,0] = img[:,-1] = -9999
+            # filter out the bad pixels
+            self.bad_pixs |= cloud_dilation( (img <= 0) | self.s2.cloud,\
+                                                iteration= ker_size/2)[self.Hx, self.Hy]
+
+            self.s2_toa[i] = signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]
+        del selected_img
+        # prepare for the angles and simulate the surface reflectance
+        self.s2.get_s2_angles(self.reconstruct_s2_angle, slic = [self.Hx, self.Hy])
+        if self.reconstruct_s2_angle:
+	    self.s2_angles = np.zeros((4, len(self.s2_u_bands), self.valid_pixs))
+            hx, hy = (self.Hx*23/10980.).astype(int), (self.Hy*23/10980.).astype(int) # index the 23*23 sun angles
+            for j, band in enumerate (self.s2_u_bands):
+                self.s2_angles[[0,2],j,:] = self.s2.angles['vza'][band],  self.s2.angles['vaa'][band] 
+                self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy],self.s2.angles['saa'][hx, hy]
+
+        else:
+            self.s2_angles = np.zeos((4,7,1))
+            self.s2_angles[[1,-1],...] = self.s2.angles['msz'], self.s2.angles['msa']
+            for i, angle in [[0,'mvz'], [2,'mva']]:
+                for j, band in enumerate (self.s2_u_bands):
+                    self.s2_angles[i][j] = self.s2.angles[angle][band]
+
+        # use mean value to fill bad values
+        for i in range(4):
+            m = np.isfinite(self.s2_angles[i])
+            self.s2_angles[i][m] = np.nanmean(self.s2_angles[i])
+        vza, sza = self.s2_angles[:2]
+	raa      = self.s2_angles[2] - self.s2_angles[3]
+        self.s2_boa, self.s2_boa_qa = get_brdf_six(self.mcd43_file, angles=[vza, sza, raa],\
+                                                   bands=(3,4,1,2,6,7,2), Linds= [self.Lx, self.Ly])
+        self.s2_boa, self.s2_boa_qa = self.s2_boa.flatten(), self.s2_boa_qa.flatten()
+
+        # get the valid value masks
+        m_mask = np.all(~self.s2_boa.mask,axis=0 ) & np.all(self.s2_boa_qa <= self.qa_thresh, axis=0)
+        s_mask = ~self.bad_pixs
+        self.ms_mask = s_mask & m_mask
+
+        # solve by patch
+        i,j = 15,18
+        patch_mask = np.logical_and.reduce(((self.Hx >= i*100),
+                                            (self.Hx < (i+1)*100),
+                                            (self.Hy >= j*100),
+                                            (self.Hy < (j+1)*100)))
+         
+        boa, toa  = self.s2_boa[:, patch_mask], modis_toa[:, patch_mask]
+	vza, sza  = np.cos(self.s2.angles[:2, patch_mask])
+      	vaa, saa  =        self.s2.angles[2:, patch_mask]
+        boa_qa    = self.s2_boa_qa[:, patch_mask]
+        mask      = self.ms_mask[patch_mask]
+        elevation = 0.5
+        prior     = 0.2, 3.4, 0.35
+        self.atmo = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
+                              toa, sza, vza, saa, vaa, elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130, 869],\
+                              band_indexs=[1, 2, 3, 7, 11, 12, 8], mask=mask, prior=prior, subsample=10)
+        self.atmo._load_unc()
+
 
 if __name__ == "__main__":
-    aero = solve_aerosol(11,4,2006, 200)
-    #aero.s2_aerosol()
-    solved  = aero.modis_aerosol()
+    aero = solve_aerosol(17,5,2016, 198)
+    aero.s2_aerosol()
+    #solved  = aero.modis_aerosol()

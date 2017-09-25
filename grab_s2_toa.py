@@ -109,7 +109,7 @@ class read_s2(object):
             self.cloud = cloud = gdal.Open(self.s2_file_dir+'/cloud.tiff').ReadAsArray().astype(bool)
         self.cloud_cover = 1.*self.cloud.sum()/self.cloud.size
 
-    def get_s2_angles(self,reconstruct = True):
+    def get_s2_angles(self,reconstruct = True, slic = None):
 
 
 	tree = ET.parse(self.s2_file_dir+'/metadata.xml')
@@ -216,9 +216,15 @@ class read_s2(object):
             self.vaa = {}; self.vza = {}
 	    for band in bands:
 		g = gdal.Open(self.s2_file_dir + '/angles/VAA_VZA_%s.img'%band)
-                VAA, VZA = g.GetRasterBand(1), g.GetRasterBand(2)
-                self.vaa[band] = VAA 
-                self.vza[band] = VZA
+                VAA, VZA = g.GetRasterBand(1).ReadAsArray(), g.GetRasterBand(2).ReadAsArray()
+                if slic is None:
+                    self.vaa[band] = VAA 
+                    self.vza[band] = VZA
+                else:
+                    resolution_ratio = VAA.shape[0]/10980
+                    x_ind, y_ind = (np.array(slic)*resolution_ratio).astype(int)
+                    self.vaa[band] = VAA[x_ind, y_ind]
+                    self.vza[band] = VZA[x_ind, y_ind]
             self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
 
 if __name__ == '__main__':

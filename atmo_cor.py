@@ -61,12 +61,12 @@ class atmo_cor(object):
 
     def _sort_emus_inputs(self,):
 
-        assert self.boa.shape[-2:] == self.mask.shape, 'mask should have the same shape as the last two axises of boa.'
+        assert self.boa.shape[1:] == self.mask.shape, 'mask should have the same shape as the last two axises of boa.'
         assert self.boa.shape      == self.toa.shape, 'toa and boa should have the same shape.'
         assert self.boa.shape      == self.boa_unc.shape, 'boa and boa_unc should have the same shape.'
         if self.atmosphere is not None:
             assert self.atmosphere.shape[0] == 3, 'Three parameters, i.e. AOT, water and Ozone are needed.'
-            assert self.boa.shape[-2:] == self.atmosphere.shape[-2:], 'boa and atmosphere should have the same shape in the last two axises.'
+            assert self.boa.shape[1:] == self.atmosphere.shape[1:], 'boa and atmosphere should have the same shape in the last two axises.'
         # make the boa and toa to be the shape of nbands * nsample
         # and apply the flattened mask and subsample 
         flat_mask    = self.mask.flatten()[self.subsample_sta::self.subsample]
@@ -84,14 +84,14 @@ class atmo_cor(object):
             if isinstance(i, (float,int)):
                 flat_angs_ele.append(i)
             else:
-                assert i.shape == self.boa.shape[-2:], 'i should have the same shape as the last two axises of boa.'
+                assert i.shape == self.boa.shape[1:], 'i should have the same shape as the last two axises of boa.'
                 flat_i = i.flatten()[self.subsample_sta::self.subsample][flat_mask]
                 flat_angs_ele.append(flat_i)
         ## for the prior
         if np.array(self.prior).ndim == 1:
             self.flat_prior = np.array(self.prior) 
         else:
-            assert self.prior.shape == self.boa.shape[-2:], 'prior should have the same shape as the last two axises of boa.'
+            assert self.prior.shape == self.boa.shape[1:], 'prior should have the same shape as the last two axises of boa.'
             self.flat_prior = self.prior.reshape(3, -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
 
         return flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, flat_angs_ele# [sza, vza, saa, vaa, elevation]        

@@ -7,13 +7,14 @@ aren't provided here.
 import datetime
 import glob
 import os
+import re
 from collections import namedtuple
 
 MODIS_granule = namedtuple("MODIS_granule", "sza saa vza vaa " +
                         "b1 b2 b3 b4 b5 b6 b7")
 
 class MODIS_L1b_reader(object):
-    def __init__ (self, folder, year):
+    def __init__ (self, folder, tile, year):
         """Instantiate with the folder were all the granules are.
         You should also provide a year to filter out the granules.
         Once this is done, you get a class witha  dictionary called
@@ -26,19 +27,22 @@ class MODIS_L1b_reader(object):
             self.year = year
         else:
             raise ValueError("MODIS starts from 2000")
-
+        if re.match ("h\d\dv\d\d", tile):
+            self.tile = tile
+        else:
+            raise ValueError("tile has to be hxxvxx (%s)" % tile)
         self._find_granules()
 
     def _find_granules(self):
         files = glob.glob(os.path.join(self.folder, 
-            "MODIS_REFL.A%d*_EV_250_Aggr500_RefSB_b0.tif" %
-            self.year))
+            "MODIS_REFL.%s.A%d*_EV_250_Aggr500_RefSB_b0.tif" %
+            (self.tile, self.year)))
         if len(files) == 0:
             raise IOError("No MODIS files in %s" % self.folder)
         self.granules = {}
         for fich in files:
             fname = os.path.basename(fich)
-            date = ".".join(fname.split(".")[1:3])
+            date = ".".join(fname.split(".")[2:4])
             date = datetime.datetime.strptime(date, "A%Y%j.%H%M")
             gg = []
             for angle in ["SolarZenith", "SolarAzimuth", "SensorZenith","SensorAzimuth"]:
@@ -62,7 +66,7 @@ class MODIS_L1b_reader(object):
 
 if __name__ == "__main__":
     modis_l1b = MODIS_L1b_reader( 
-            "/storage/ucfajlg/Ujia/MODIS_L1b/GRIDDED/", 
+            "/storage/ucfajlg/Ujia/MODIS_L1b/GRIDDED/", "h17v05",
             2017)
         
     

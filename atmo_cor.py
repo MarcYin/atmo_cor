@@ -84,9 +84,17 @@ class atmo_cor(object):
             if isinstance(i, (float,int)):
                 flat_angs_ele.append(i)
             else:
-                assert i.shape == self.boa.shape[1:],'i should have the same shape as the last two axises of boa.'
-                flat_i = i.reshape(1, -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
-                flat_angs_ele.append(flat_i)
+                if i.ndim == self.boa.ndim:
+                    assert i.shape[0] == self.boa.shape[0], 'check the shape of i.'
+                    flat_i = i.reshape(i.shape[0], -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
+                elif i.ndim == self.boa.ndim-1:
+                    assert i.shape == self.boa.shape[1:], 'check the shape of i.'
+                    flat_i = i.flatten()[...,self.subsample_sta::self.subsample][...,flat_mask]
+                elif i.ndim == self.boa.ndim-2:
+                    flat_i = i
+                else:
+                    raise IOError
+                flat_angs_ele.append(list(flat_i))
         ## for the prior
         if np.array(self.prior).ndim == 1:
             self.flat_prior = np.array(self.prior) 

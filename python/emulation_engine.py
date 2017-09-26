@@ -27,8 +27,9 @@ import os
 import glob
 import sys
 import cPickle
-import numpy as np
 import logging as log
+import numpy as np
+
 import gp_emulator # unnecessary?
 
 
@@ -92,6 +93,20 @@ def perband_emulators ( emulators, band_pass ):
     return emus
 
 
+def extract_angles(angles):
+    """A method that copes with different ways the user has to
+    provide angles. This method should be able to cope with either
+    (i) a single scalar angle, (ii) a 2D array of angles and (iii)
+    either a scalar or 2D array of angles per band."""
+    
+    if type(angles) == list:
+        temp = [np.asarray(x).reshape(1, -1)[0,:] for x in angles]
+        angles = temp
+    else:
+        angles = np.asarray(angles).reshape(1, -1)[0,:]
+        
+    return angles
+
 
 class AtmosphericEmulationEngine(object):
     """An emulation engine for single band atmospheric RT models.
@@ -125,6 +140,7 @@ class AtmosphericEmulationEngine(object):
         self.emulators = np.array(self.emulators).ravel()
         self.n_bands = len(self.emulators)
 
+
     def emulator_kernel_atmosphere(self, kernel_weights, atmosphere, 
                 sza, vza, saa, vaa, elevation, 
                 gradient_kernels=True, bands=None):
@@ -155,10 +171,10 @@ class AtmosphericEmulationEngine(object):
         
         # the controls can be scalars or arrays
         # We convert them to arrays if needed
-        sza = np.asarray(sza).reshape(1, -1)[0,:]
-        vza = np.asarray(vza).reshape(1, -1)[0,:]
-        saa = np.asarray(saa).reshape(1, -1)[0,:]
-        vaa = np.asarray(vaa).reshape(1, -1)[0,:]
+        sza = extract_angles(sza)
+        saa = extract_angles(saa)
+        vza = extract_angles(vza)
+        vaa = extract_angles(vaa)
         elevation = np.asarray(elevation).reshape(1, -1)[0,:]
         # the mother of all arrays will be 3*nbands+3+4
         n_pix1 = kernel_weights.shape[2]
@@ -166,17 +182,32 @@ class AtmosphericEmulationEngine(object):
         assert n_pix1 == n_pix2  # In reality could check angles and stuff
         n_pix = n_pix1 
         x = np.zeros((8 + 3, n_pix)) # 11 parameters innit?
-        x[3:, :] = np.c_[np.cos(sza)*np.ones(n_pix), 
-                         np.cos(vza)*np.ones(n_pix), 
-                         saa*np.ones(n_pix), vaa*np.ones(n_pix), 
-                         atmosphere[0,:], atmosphere[1,:], atmosphere[2,:], 
-                         elevation*np.ones(n_pix)].T
-        
+        # Only populate the atmospheric parameters
+        # Angles and kernels are defined per band below
+        x[7:, :] = np.c_[atmosphere[0,:], atmosphere[1,:], 
+                         atmosphere[2,:], elevation*np.ones(n_pix)].T        
         H0 = []
         dH = []
         if bands is None: # Do all bands
-            for band in xrange(self.n_bands):
+            for j, band in enumerate(range(self.n_bands)):
                 emu = self.emulators[band]
+                if type(sza) == list:
+                    x[3] = np.cos(sza[j])*np.ones(n_pix)
+                else:
+                    x[3] = np.cos(sza)*np.ones(n_pix)
+                if type(vza) == list:
+                    x[4] = np.cos(vza[j])*np.ones(n_pix)
+                else:
+                    x[4] = np.cos(vza)*np.ones(n_pix)
+                if type(saa) == list:
+                    x[5] = saa[j]*np.ones(n_pix)
+                else:
+                    x[5] = saa*np.ones(n_pix)
+                if type(vaa) == list:
+                    x[6] = vaa[j]*np.ones(n_pix)
+                else:
+                    x[6] = vaa*np.ones(n_pix)
+
                 x[0, :] = kernel_weights[0, band, :] # Iso
                 x[1, :] = kernel_weights[1, band, :] # Vol
                 x[2, :] = kernel_weights[2, band, :] # Geo
@@ -203,14 +234,48 @@ class AtmosphericEmulationEngine(object):
             for j, band in enumerate(the_bands):
                 emu = self.emulators[band]
                 if is_subset:
+                    if type(sza) == list:
+                        x[3] = np.cos(sza[j])*np.ones(n_pix)
+                    else:
+                        x[3] = np.cos(sza)*np.ones(n_pix)
+                    if type(vza) == list:
+                        x[4] = np.cos(vza[j])*np.ones(n_pix)
+                    else:
+                        x[4] = np.cos(vza)*np.ones(n_pix)
+                    if type(saa) == list:
+                        x[5] = saa[j]*np.ones(n_pix)
+                    else:
+                        x[5] = saa*np.ones(n_pix)
+                    if type(vaa) == list:
+                        x[6] = vaa[j]*np.ones(n_pix)
+                    else:
+                        x[6] = vaa*np.ones(n_pix)
+
                     x[0, :] = kernel_weights[0, j, :] # Iso
                     x[1, :] = kernel_weights[1, j, :] # Vol
                     x[2, :] = kernel_weights[2, j, :] # Geo                    
                 else:
+                    if type(sza) == list:
+                        x[3] = np.cos(sza[j])*np.ones(n_pix)
+                    else:
+                        x[3] = np.cos(sza)*np.ones(n_pix)
+                    if type(vza) == list:
+                        x[4] = np.cos(vza[j])*np.ones(n_pix)
+                    else:
+                        x[4] = np.cos(vza)*np.ones(n_pix)
+                    if type(saa) == list:
+                        x[5] = saa[j]*np.ones(n_pix)
+                    else:
+                        x[5] = saa*np.ones(n_pix)
+                    if type(vaa) == list:
+                        x[6] = vaa[j]*np.ones(n_pix)
+                    else:
+                        x[6] = vaa*np.ones(n_pix)
+
                     x[0, :] = kernel_weights[0, band, :] # Iso
                     x[1, :] = kernel_weights[1, band, :] # Vol
                     x[2, :] = kernel_weights[2, band, :] # Geo
-                H0_, dH_ = emu.predict(x, do_unc=False)
+                H0_, dH_ = emu.predict(x.T, do_unc=False)
                 if not gradient_kernels:
                     dH_ = dH_[3:, :] # Ignore the kernels in the gradient 
                 H0.append(H0_)
@@ -248,28 +313,46 @@ class AtmosphericEmulationEngine(object):
         """
         # the controls can be scalars or arrays
         # We convert them to arrays if needed
-        sza = np.asarray(sza).reshape(1, -1)[0,:]
-        vza = np.asarray(vza).reshape(1, -1)[0,:]
-        saa = np.asarray(saa).reshape(1, -1)[0,:]
-        vaa = np.asarray(vaa).reshape(1, -1)[0,:]
 
+        sza = extract_angles(sza)
+        saa = extract_angles(saa)
+        vza = extract_angles(vza)
+        vaa = extract_angles(vaa)
+
+        elevation = np.asarray(elevation).reshape(1, -1)[0,:]
         # the mother of all arrays will be 3*nbands+3+4
         n_pix1 = reflectance.shape[1]
         n_pix2 = atmosphere.shape[1]
         assert n_pix1 == n_pix2  # In reality could check angles and stuff
         n_pix = n_pix1 
         x = np.zeros((9, n_pix)) # 10 parameters innit?
-        x[:-1, :] = np.c_[np.cos(sza)*np.ones(n_pix), 
-                         np.cos(vza)*np.ones(n_pix), 
-                         saa*np.ones(n_pix), vaa*np.ones(n_pix), 
-                         atmosphere[0,:], atmosphere[1,:], atmosphere[2,:], 
-                         elevation*np.ones(n_pix)].T
+        # Set up atmospheric parameters
+        # Angles and isotropic reflectance are/can be defined **per band**
+        x[4:-1, :] = np.c_[atmosphere[0,:], atmosphere[1,:], 
+                         atmosphere[2,:], elevation*np.ones(n_pix)].T
         H0 = []
         dH = []
         if bands is None: # Do all bands
-            for band in xrange(self.n_bands):
+            for j, band in enumerate(range(self.n_bands)):
                 emu = self.emulators[band]
-                x[-1, :] = reflectance[band, :]
+                if type(sza) == list:
+                    x[0] = np.cos(sza[j])*np.ones(n_pix)
+                else:
+                    x[0] = np.cos(sza)*np.ones(n_pix)
+                if type(vza) == list:
+                    x[1] = np.cos(vza[j])*np.ones(n_pix)
+                else:
+                    x[1] = np.cos(vza)*np.ones(n_pix)
+                if type(saa) == list:
+                    x[2] = saa[j]*np.ones(n_pix)
+                else:
+                    x[2] = saa*np.ones(n_pix)
+                if type(vaa) == list:
+                    x[3] = vaa[j]*np.ones(n_pix)
+                else:
+                    x[3] = vaa*np.ones(n_pix)
+
+                x[-1, ] = reflectance[band, :]
                 H0_, dH_ = emu.predict(x.T, do_unc=False)
                 if not gradient_refl:
                     dH_ = dH_[:-1, :] # Ignore the SDR in the gradient 
@@ -294,9 +377,42 @@ class AtmosphericEmulationEngine(object):
             for j, band in enumerate(the_bands):
                 emu = self.emulators[band]
                 if is_subset:
+                    if type(sza) == list:
+                        x[0] = np.cos(sza[j])*np.ones(n_pix)
+                    else:
+                        x[0] = np.cos(sza)*np.ones(n_pix)
+                    if type(vza) == list:
+                        x[1] = np.cos(vza[j])*np.ones(n_pix)
+                    else:
+                        x[1] = np.cos(vza)*np.ones(n_pix)
+                    if type(saa) == list:
+                        x[2] = saa[j]*np.ones(n_pix)
+                    else:
+                        x[2] = saa*np.ones(n_pix)
+                    if type(vaa) == list:
+                        x[3] = vaa[j]*np.ones(n_pix)
+                    else:
+                        x[3] = vaa*np.ones(n_pix)
                     x[-1, :] = reflectance[j, :] 
                 else:
+                    if type(sza) == list:
+                        x[0] = np.cos(sza[j])*np.ones(n_pix)
+                    else:
+                        x[0] = np.cos(sza)*np.ones(n_pix)
+                    if type(vza) == list:
+                        x[1] = np.cos(vza[j])*np.ones(n_pix)
+                    else:
+                        x[1] = np.cos(vza)*np.ones(n_pix)
+                    if type(saa) == list:
+                        x[2] = saa[j]*np.ones(n_pix)
+                    else:
+                        x[2] = saa*np.ones(n_pix)
+                    if type(vaa) == list:
+                        x[3] = vaa[j]*np.ones(n_pix)
+                    else:
+                        x[3] = vaa*np.ones(n_pix)
                     x[-1, :] = reflectance[band, :]
+                    
                 H0_, dH_ = emu.predict(x.T, do_unc=False)
                 if not gradient_refl:
                     dH_ = dH_[:-1, :] # Ignore the SDR in the gradient 

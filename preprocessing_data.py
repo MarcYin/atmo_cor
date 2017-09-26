@@ -12,6 +12,10 @@ import datetime
 from scipy import signal, ndimage
 from grab_s2_toa import read_s2
 from spatial_mapping import Find_corresponding_pixels, cloud_dilation
+from modis_l1b_reader import MODIS_L1b_reader
+import gdal
+from emulation_engine import AtmosphericEmulationEngine
+
 
 
 class solve_aerosol(object):
@@ -21,8 +25,9 @@ class solve_aerosol(object):
     '''
     def __init__(self,h,v,
                  year, doy,
-                 mcd43_dir   = '/home/ucfafyi/DATA/S2_MODIS/m_data/',
-                 mod_l1b_dir = '/data/selene/ucfajlg/Bondville_MODIS/THERMAL',
+                 emus_dir    = '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',
+                 mcd43_dir   = '/data/selene/ucfajlg/Ujia/MCD43/',
+                 mod_l1b_dir = '/data/selene/ucfajlg/Ujia/MODIS_L1b/GRIDDED',
                  s2_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/s_data/',
                  l8_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/l_data/',
                  s2_tile     = '29SQB',
@@ -37,10 +42,10 @@ class solve_aerosol(object):
 
         self.year        = year 
         self.doy         = doy
-        date             = datetime.datetime(self.year, 1, 1) \
+        self.date        = datetime.datetime(self.year, 1, 1) \
                                              + datetime.timedelta(self.doy - 1)
-        self.month       = date.month
-        self.day         = date.day
+        self.month       = self.date.month
+        self.day         = self.date.day
         self.h           = h
         self.v           = v
         self.mcd43_dir   = mcd43_dir
@@ -59,57 +64,89 @@ class solve_aerosol(object):
         mcd43_tmp       = '%s/MCD43A1.A%d%03d.h%02dv%02d.006.*.hdf'
         self.mcd43_file = glob(mcd43_tmp%(self.mcd43_dir,\
                                 self.year, self.doy, self.h, self.v))[0]
+
+
+    def _load_emus(self, sensor):
+        AEE = AtmosphericEmulationEngine(sensor, self.emus_dir)
+        up_bounds   = self.AEE.emulators[0].inputs[:,4:7].max(axis=0)
+        low_bounds  = self.AEE.emulators[0].inputs[:,4:7].min(axis=0)
+        bounds = np.array([low_bounds, up_bounds]).T
+        return AEE, bounds
+    def prepare_modis(self,):
+        
+        modis_l1b       = MODIS_L1b_reader(self.mod_l1b_dir, "h%02dv%02d"%(self.h,self.v),self.year)
+        self.modis_files = [modis_l1b.granules[i] for i in modis_l1b.granules.keys() if i.date() == self.date.date()]
+        #self.modis_toa, self.modis_angles = grab_modis_toa(year=2006,doy=200,verbose=True,\
+        #                                                   mcd43file = self.mcd43_file, directory_l1b= self.mod_l1b_dir)
+        for modis_file in self.modis_files[1:2]:
+            band_files  = [getattr(modis_file, 'b%d'%band) for band in range(1,8)]
+            angle_files = [getattr(modis_file, ang) for ang in ['vza', 'sza', 'vaa', 'saa']]
+            modis_toa   = []
+            modis_angle = []
+            for band_file in band_files:
+                g = gdal.Open(band_file)
+                if g is None:
+                    raise IOError
+                else:
+                    data = g.ReadAsArray()
+                modis_toa.append(data)
+            for angle_file in angle_files:
+                g = gdal.Open(angle_file)
+                if g is None:
+                    raise IOError
+                else:
+                    data = g.ReadAsArray()
+                modis_angle.append(data)
+            self.modis_toa   = np.array(modis_toa)/10000.
+            self.modis_angle = np.array(modis_angle)/100.
+            self.modis_aerosol()
+            
     def modis_aerosol(self, save_file=False):
+        
+        vza, sza, vaa, saa = self.modis_angle
+	self.modis_boa, self.modis_boa_qa = get_brdf_six(self.mcd43_file,angles = [vza, sza, vaa - saa],
+							 bands= (1,2,3,4,5,6,7), flag=None, Linds= None)
+	if self.mod_cloud is None:
+	    self.modis_cloud = np.zeros_like(self.modis_toa[0]).astype(bool)
 
-        self.modis_toa, self.modis_angles = grab_modis_toa(year=2006,doy=200,verbose=True,\
-                                                           mcd43file = self.mcd43_file, directory_l1b= self.mod_l1b_dir)
-        solved = []
-        for t, modis_toa in enumerate( self.modis_toa):
-            modis_angle = self.modis_angles[t]
-            self.modis_boa, self.modis_boa_qa = get_brdf_six(self.mcd43_file, (modis_angle[0],\
-                                                             modis_angle[1], modis_angle[2] - modis_angle[3]),\
-                                                             bands=[1,2,3,4,5,6,7], flag=None, Linds= None)
-            if self.mod_cloud is None:
-                self.modis_cloud = np.zeros_like(modis_toa[0]).astype(bool)
+	self.quality_mask = np.all(self.modis_boa_qa <= self.qa_thresh, axis =0) 
+	self.valid_mask   = np.all(~self.modis_boa.mask, axis = 0)
+	self.toa_mask     = np.all(np.isfinite(self.modis_toa), axis=0) &\
+                                   np.all(self.modis_toa>=0, axis=0) & \
+                                   np.all(self.modis_toa<=1, axis=0)
 
-            self.quality_mask = np.all(self.modis_boa_qa <= self.qa_thresh, axis =0) 
-            self.valid_mask   = np.all(~self.modis_boa.mask, axis = 0)
-            self.toa_mask     = np.all(np.isfinite(modis_toa), axis=0)
-            self.mask         = self.quality_mask & self.valid_mask & self.toa_mask & (~self.modis_cloud)
-            self.patch_mask   = np.zeros_like(self.mask).astype(bool)
-            i,j = 15,18
-            self.patch_mask[i*100:(i+1)*100,j*100:(j+1)*100] = True        
-            boa, toa  = self.modis_boa[:,self.patch_mask].reshape(7,100, 100), modis_toa[:,self.patch_mask].reshape(7,100, 100)
-	    vza, sza  = (modis_angle[:2, self.patch_mask]*np.pi/180.).reshape(2,100, 100)
-	    vaa, saa  =  modis_angle[2:, self.patch_mask].reshape(2,100, 100)
-	    boa_qa    = self.qa[:,self.patch_mask].reshape(7,100,100)
-	    mask      = self.mask[self.patch_mask].reshape(100, 100)
-	    prior     = 0.2, 3.4, 0.35
-	    aot       = np.zeros((100, 100)) 
-	    water     = aot.copy()
-	    ozone     =  aot.copy()
-	    aot[:]    = 0.2
-            water[:]  = 3.4
-            ozone[:]  = 0.35
-	    atmosphere= np.array([aot, water, ozone])
-	    self.atmo = atmo_cor('TERRA', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
-			toa,sza,vza,saa,vaa,0.5, boa_qa, boa_bands=[645,869,469,555,1240,1640,2130], \
-			band_indexs=[0,1,2,3,4,5,6], mask=mask, prior=prior, atmosphere = atmosphere, subsample=10)
-	    self.atmo._load_unc()
-	    
-	    if t==0:
-		self.atmo._load_emus()
-		self.AEE    = self.atmo.AEE
-		self.bounds = self.atmo.bounds
-	    else:
-		self.atmo.AEE    = self.AEE
-		self.atmo.bounds =  self.bounds
+	self.mask         = self.quality_mask & self.valid_mask & self.toa_mask & (~self.modis_cloud)
+	self.patch_mask   = np.zeros_like(self.mask).astype(bool)
+       
+        self.modis_AEE, self.modis_bounds = self._load_emus('TERRA')
+        
+    def block_solver(self,block):
+	i,j = block
+	self.patch_mask[i*100:(i+1)*100,j*100:(j+1)*100] = True        
+	boa, toa  = self.modis_boa[:,self.patch_mask].reshape(7,100, 100), self.modis_toa[:,self.patch_mask].reshape(7,100, 100)
+	vza, sza  = (self.modis_angle[:2, self.patch_mask]*np.pi/180.).reshape(2,100, 100)
+	vaa, saa  =  self.modis_angle[2:, self.patch_mask].reshape(2,100, 100)
+	boa_qa    = self.modis_boa_qa[:,self.patch_mask].reshape(7,100,100)
+	mask      = self.mask[self.patch_mask].reshape(100, 100)
+	prior     = 0.2, 3.4, 0.35
+	aot       = np.zeros((100, 100)) 
+	water     = aot.copy()
+	ozone     =  aot.copy()
+	aot[:]    = 0.2
+	water[:]  = 3.4
+	ozone[:]  = 0.35
+	atmosphere= np.array([aot, water, ozone])
+	self.atmo = atmo_cor('TERRA', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
+		    toa,sza,vza,saa,vaa,0.5, boa_qa, boa_bands=[645,869,469,555,1240,1640,2130], \
+		    band_indexs=[0,1,2,3,4,5,6], mask=mask, prior=prior, atmosphere = atmosphere, subsample=10)
+	self.atmo._load_unc()
+	self.atmo.AEE    = self.modis_AEE
+	self.atmo.bounds = self.modis_bounds
 
-            if mask.sum() > 0:
-                break
-            else:
-                continue
-
+	if mask.sum() > 0:
+	    print 'No valid values in patch %03d%03d'%(i,j)
+	else:
+            pass
             '''
             for i in range(24):
                 for j in range(24):
@@ -206,7 +243,7 @@ class solve_aerosol(object):
                 img = selected_img[band]
             img[0,:] = img[-1,:] = img[:,0] = img[:,-1] = -9999
             # filter out the bad pixels
-            self.bad_pixs |= cloud_dilation( (img <= 0) | self.s2.cloud,\
+            self.bad_pixs |= cloud_dilation( (img <= 0) | self.s2.cloud | (img > 10000),\
                                                 iteration= ker_size/2)[self.Hx, self.Hy]
 
             self.s2_toa[i] = signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]*0.0001
@@ -250,13 +287,13 @@ class solve_aerosol(object):
                                             (self.Hy < (j+1)*100)))
          
         boa, toa  = self.s2_boa[:, patch_mask], self.s2_toa[:, patch_mask]
-	vza, sza  = (self.s2_angles[:2,:, patch_mask]*np.pi/180.).mean(axis=1) # change later....not using the mean values
-      	vaa, saa  = (self.s2_angles[2:,:, patch_mask]).mean(axis=1)
+	vza, sza  = (self.s2_angles[:2,:, patch_mask]*np.pi/180.) # change later....not using the mean values
+      	vaa, saa  = (self.s2_angles[2:,:, patch_mask])
         boa_qa    = self.s2_boa_qa[:, patch_mask]
         mask      = self.ms_mask[patch_mask]
         elevation = 0.5
         prior     = 0.2, 3.4, 0.35
-        self.atmo = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
+        self.atmo = atmo_cor('MSI', '/home/ucfafyi/DATA/Multiply/emus',boa, \
                               toa, sza, vza, saa, vaa, elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130, 869],\
                               band_indexs=[1, 2, 3, 7, 11, 12, 8], mask=mask, prior=prior, subsample=1)
         self.atmo._load_unc()
@@ -264,6 +301,6 @@ class solve_aerosol(object):
 
 
 if __name__ == "__main__":
-    aero = solve_aerosol(17,5,2016, 198)
-    aero.s2_aerosol()
-    #solved  = aero.modis_aerosol()
+    aero = solve_aerosol(17,5,2017, 230)
+    #aero.s2_aerosol()
+    solved  = aero.prepare_modis()

@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, '/data/store01/data_dirs/students/ucfafyi/Multiply/Aeronet/python')
 from cloud import classification
 import subprocess
+import copy
 
 def read_s2_band(fname):
         g = gdal.Open(fname)
@@ -56,7 +57,7 @@ class read_s2(object):
 	    b1, b9, b10 = data2
 	    img = dict(zip(self.s2_bands, [b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b8a]))
 	    if self.bands is not None:
-	        imgs = {k: img[k] for k in bands}
+	        imgs = {k: img[k] for k in self.bands}
 	    else:
 	        imgs = img
         else:
@@ -66,7 +67,7 @@ class read_s2(object):
              pool = Pool(processes=len(fname))
              ret = pool.map(read_s2_band, fname)
              imgs = dict(zip(self.bands, ret))
-	return imgs
+	return copy.deepcopy(imgs)
 
     def get_s2_cloud(self,):
         if glob(self.s2_file_dir+'/cloud.tiff')==[]:

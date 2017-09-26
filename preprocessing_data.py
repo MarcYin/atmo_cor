@@ -80,15 +80,17 @@ class solve_aerosol(object):
             i,j = 15,18
             self.patch_mask[i*100:(i+1)*100,j*100:(j+1)*100] = True        
             boa, toa  = self.modis_boa[:,self.patch_mask].reshape(7,100, 100), modis_toa[:,self.patch_mask].reshape(7,100, 100)
-	    vza, sza  = np.cos(modis_angle[:2, self.patch_mask]).reshape(2,100, 100)
-	    vaa, saa  =        modis_angle[2:, self.patch_mask].reshape(2,100, 100)
+	    vza, sza  = (modis_angle[:2, self.patch_mask]*np.pi/180.).reshape(2,100, 100)
+	    vaa, saa  =  modis_angle[2:, self.patch_mask].reshape(2,100, 100)
 	    boa_qa    = self.qa[:,self.patch_mask].reshape(7,100,100)
 	    mask      = self.mask[self.patch_mask].reshape(100, 100)
 	    prior     = 0.2, 3.4, 0.35
 	    aot       = np.zeros((100, 100)) 
 	    water     = aot.copy()
 	    ozone     =  aot.copy()
-	    aot[:]=0.2; water[:] = 3.4; ozone[:] = 0.35
+	    aot[:]    = 0.2
+            water[:]  = 3.4
+            ozone[:]  = 0.35
 	    atmosphere= np.array([aot, water, ozone])
 	    self.atmo = atmo_cor('TERRA', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
 			toa,sza,vza,saa,vaa,0.5, boa_qa, boa_bands=[645,869,469,555,1240,1640,2130], \
@@ -207,7 +209,7 @@ class solve_aerosol(object):
             self.bad_pixs |= cloud_dilation( (img <= 0) | self.s2.cloud,\
                                                 iteration= ker_size/2)[self.Hx, self.Hy]
 
-            self.s2_toa[i] = signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]
+            self.s2_toa[i] = signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]*0.0001
         del selected_img
         # prepare for the angles and simulate the surface reflectance
         self.s2.get_s2_angles(self.reconstruct_s2_angle, slic = [self.Hx, self.Hy])
@@ -215,7 +217,7 @@ class solve_aerosol(object):
 	    self.s2_angles = np.zeros((4, len(self.s2_u_bands), self.valid_pixs))
             hx, hy = (self.Hx*23/10980.).astype(int), (self.Hy*23/10980.).astype(int) # index the 23*23 sun angles
             for j, band in enumerate (self.s2_u_bands):
-                self.s2_angles[[0,2],j,:] = self.s2.angles['vza'][band],  self.s2.angles['vaa'][band] 
+                self.s2_angles[[0,2],j,:] = self.s2.angles['vza'][band]/100.,  self.s2.angles['vaa'][band]/100. 
                 self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy],self.s2.angles['saa'][hx, hy]
 
         else:
@@ -227,13 +229,13 @@ class solve_aerosol(object):
 
         # use mean value to fill bad values
         for i in range(4):
-            m = np.isfinite(self.s2_angles[i])
+            m = ~np.isfinite(self.s2_angles[i])
             self.s2_angles[i][m] = np.nanmean(self.s2_angles[i])
         vza, sza = self.s2_angles[:2]
 	raa      = self.s2_angles[2] - self.s2_angles[3]
         self.s2_boa, self.s2_boa_qa = get_brdf_six(self.mcd43_file, angles=[vza, sza, raa],\
                                                    bands=(3,4,1,2,6,7,2), Linds= [self.Lx, self.Ly])
-        self.s2_boa, self.s2_boa_qa = self.s2_boa.flatten(), self.s2_boa_qa.flatten()
+        #self.s2_boa, self.s2_boa_qa = self.s2_boa.flatten(), self.s2_boa_qa.flatten()
 
         # get the valid value masks
         m_mask = np.all(~self.s2_boa.mask,axis=0 ) & np.all(self.s2_boa_qa <= self.qa_thresh, axis=0)
@@ -247,17 +249,18 @@ class solve_aerosol(object):
                                             (self.Hy >= j*100),
                                             (self.Hy < (j+1)*100)))
          
-        boa, toa  = self.s2_boa[:, patch_mask], modis_toa[:, patch_mask]
-	vza, sza  = np.cos(self.s2.angles[:2, patch_mask])
-      	vaa, saa  =        self.s2.angles[2:, patch_mask]
+        boa, toa  = self.s2_boa[:, patch_mask], self.s2_toa[:, patch_mask]
+	vza, sza  = (self.s2_angles[:2,:, patch_mask]*np.pi/180.).mean(axis=1) # change later....not using the mean values
+      	vaa, saa  = (self.s2_angles[2:,:, patch_mask]).mean(axis=1)
         boa_qa    = self.s2_boa_qa[:, patch_mask]
         mask      = self.ms_mask[patch_mask]
         elevation = 0.5
         prior     = 0.2, 3.4, 0.35
         self.atmo = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
                               toa, sza, vza, saa, vaa, elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130, 869],\
-                              band_indexs=[1, 2, 3, 7, 11, 12, 8], mask=mask, prior=prior, subsample=10)
+                              band_indexs=[1, 2, 3, 7, 11, 12, 8], mask=mask, prior=prior, subsample=1)
         self.atmo._load_unc()
+        self.atmo._load_emus()
 
 
 if __name__ == "__main__":

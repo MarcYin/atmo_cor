@@ -84,8 +84,8 @@ class atmo_cor(object):
             if isinstance(i, (float,int)):
                 flat_angs_ele.append(i)
             else:
-                assert i.shape == self.boa.shape[1:], 'i should have the same shape as the last two axises of boa.'
-                flat_i = i.flatten()[self.subsample_sta::self.subsample][flat_mask]
+                assert i.shape == self.boa.shape[1:],'i should have the same shape as the last two axises of boa.'
+                flat_i = i.reshape(1, -1)[...,self.subsample_sta::self.subsample][...,flat_mask]
                 flat_angs_ele.append(flat_i)
         ## for the prior
         if np.array(self.prior).ndim == 1:
@@ -104,10 +104,11 @@ class atmo_cor(object):
                 return 0, np.array([0,0,0]) # any empty array result in earlier leaving the estimation
         H0, dH = self.AEE.emulator_reflectance_atmosphere(flat_boa, flat_atmos, sza, vza, saa, vaa, elevation, bands=self.band_indexs)
         H0, dH = np.array(H0), np.array(dH)
-        diff = (flat_toa - H0) #[..., None] dd an extra dimentiaon to match the dH 
-        correction_mask = np.isfinite(diff).all(axis=0)
-        diff[:,~correction_mask] = 0.
-        dH[:,~correction_mask,:] = 0.
+        diff = (flat_toa - H0) 
+        self.correction_mask = np.isfinite(diff)
+        # correction mask to set 0 or larger number?
+        diff[~self.correction_mask] = 0.
+        dH[~self.correction_mask,:] = 0.
         J  = (0.5 * self.band_weights[...,None] * diff**2 / (self.band_weights[...,None].sum() * flat_boa_unc**2)).sum(axis=(0,1))
         full_dJ = [ self.band_weights[...,None] * dH[:,:,i] * diff/(self.band_weights[...,None].sum() * flat_boa_unc**2) for i in xrange(4,7)]
         if is_full:
@@ -148,14 +149,14 @@ class atmo_cor(object):
         '''
         An optimization function used for the retrieval of atmospheric parameters
         '''        
-        p0     = 0.2, 3.4, 0.5 
+        p0     = self.prior 
         psolve1 = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint=1, bounds=self.bounds,fprime=None)
         #psolve2 = optimize.fmin(self.fmin_cost, p0, full_output=True, maxiter=100, maxfun=150, disp=0)
         return psolve1#, psolve2
  
     def fmin_l_bfgs_cost(self,p):
 
-        self.atmosphere     = np.ones(self.toa.shape[-2:])*np.array(p)[..., None, None]
+        self.atmosphere     = np.array([i*np.ones(self.toa.shape[1:]) for i in p])
 
         obs_J, obs_J_       = self.obs_cost()
         prior_J, prior_J_   = self.prior_cost()
@@ -168,7 +169,7 @@ class atmo_cor(object):
 
     def fmin_cost(self,p):
 
-        self.atmosphere     = np.ones(self.toa.shape[-2:])*np.array(p)[..., None, None]
+        self.atmosphere     = np.array([i*np.ones(self.toa.shape[1:]) for i in p])
 
         obs_J, obs_J_       = self.obs_cost()
         prior_J, prior_J_   = self.prior_cost()

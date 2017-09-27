@@ -10,8 +10,10 @@ import os
 import re
 from collections import namedtuple
 
+import gdal
+
 MODIS_granule = namedtuple("MODIS_granule", "sza saa vza vaa " +
-                        "b1 b2 b3 b4 b5 b6 b7")
+                           "b1 b2 b3 b4 b5 b6 b7 scale offset")
 
 class MODIS_L1b_reader(object):
     def __init__ (self, folder, tile, year):
@@ -45,6 +47,8 @@ class MODIS_L1b_reader(object):
             date = ".".join(fname.split(".")[2:4])
             date = datetime.datetime.strptime(date, "A%Y%j.%H%M")
             gg = []
+            scales = []
+            offsets = []
             for angle in ["SolarZenith", "SolarAzimuth", "SensorZenith","SensorAzimuth"]:
                 this_fname = fname.replace("MODIS_REFL", "MODTHERM")
                 this_fname = this_fname.replace(
@@ -55,12 +59,22 @@ class MODIS_L1b_reader(object):
                 this_fname = fname.replace(
                         "EV_250_Aggr500_RefSB_b0.tif",
                         "EV_250_Aggr500_RefSB_b%d.tif" % (band))
+                g = gdal.Open(os.path.join(self.folder, this_fname))
+                md = g.GetMetadata()
+                scales.append(float(md['reflectance_scales'].split(",")[band]))
+                offsets.append(float(md['reflectance_offsets'].split(",")[band]))
                 gg.append(os.path.join(self.folder, this_fname))
             for band in xrange(5):
                 this_fname = fname.replace(
                         "EV_250_Aggr500_RefSB_b0.tif",
                         "EV_500_RefSB_b%d.tif" % (band))
+                g = gdal.Open(os.path.join(self.folder, this_fname))
+                md = g.GetMetadata()
+                scales.append(float(md['reflectance_scales'].split(",")[band]))
+                offsets.append(float(md['reflectance_offsets'].split(",")[band]))
                 gg.append(os.path.join(self.folder, this_fname))
+            gg.append(scales)
+            gg.append(offsets)
             self.granules[date] = MODIS_granule(*gg)
             
 

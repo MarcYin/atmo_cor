@@ -112,11 +112,11 @@ class atmo_cor(object):
                 return 0, np.array([0,0,0]) # any empty array result in earlier leaving the estimation
         H0, dH = self.AEE.emulator_reflectance_atmosphere(flat_boa, flat_atmos, sza, vza, saa, vaa, elevation, bands=self.band_indexs)
         H0, dH = np.array(H0), np.array(dH)
-        diff = (flat_toa - H0) 
-        self.correction_mask = np.isfinite(diff)
+        diff = (H0 - flat_toa) # order is important!
+        correction_mask = np.isfinite(diff)
         # correction mask to set 0 or larger number?
-        diff[~self.correction_mask] = 0.
-        dH[~self.correction_mask,:] = 0.
+        diff[~correction_mask] = 0.
+        dH[~correction_mask,:] = 0.
         J  = (0.5 * self.band_weights[...,None] * diff**2 / (self.band_weights[...,None].sum() * flat_boa_unc**2)).sum(axis=(0,1))
         full_dJ = [ self.band_weights[...,None] * dH[:,:,i] * diff/(self.band_weights[...,None].sum() * flat_boa_unc**2) for i in xrange(4,7)]
         if is_full:

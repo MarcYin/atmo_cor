@@ -80,7 +80,7 @@ class MODIS_L1b_reader(object):
 
 if __name__ == "__main__":
     modis_l1b = MODIS_L1b_reader( 
-            "/storage/ucfajlg/Ujia/MODIS_L1b/GRIDDED/", "h17v05",
+            "/data/selene/ucfajlg/Ujia/MODIS_L1b/GRIDDED/", "h17v05",
             2017)
         
     

@@ -5,8 +5,6 @@ import xml.etree.ElementTree as ET
 import numpy as np
 from multiprocessing import Pool
 from glob import glob
-import sys
-sys.path.insert(0, '/data/store01/data_dirs/students/ucfafyi/Multiply/Aeronet/python')
 from cloud import classification
 import subprocess
 import copy
@@ -67,14 +65,16 @@ class read_s2(object):
              pool = Pool(processes=len(fname))
              ret = pool.map(read_s2_band, fname)
              imgs = dict(zip(self.bands, ret))
-	return copy.deepcopy(imgs)
+        self.selected_img = copy.deepcopy(imgs)
+        return self.selected_img
 
     def get_s2_cloud(self,):
         if glob(self.s2_file_dir+'/cloud.tiff')==[]:
             print 'loading Sentinel2 data...'
             needed_bands = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A'
             if self.selected_img is None:
-                img = self.get_s2_toa(vrt=False, bands = needed_bands)
+                self.bands = needed_bands
+                img = self.get_s2_toa(vrt=False)
             else:
                 add_band   = [i for i in needed_bands if i not in self.selected_img.keys()]
                 exist_band = [i for i in needed_bands if i in self.selected_img.keys()]

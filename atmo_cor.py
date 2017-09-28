@@ -94,7 +94,7 @@ class atmo_cor(object):
                     flat_i = i
                 else:
                     raise IOError
-                flat_angs_ele.append(list(flat_i))
+                flat_angs_ele.append([np.array(item) for item in flat_i]) # make sure the type dose not change...
         ## for the prior
         if np.array(self.prior).ndim == 1:
             self.flat_prior = np.array(self.prior) 
@@ -109,7 +109,7 @@ class atmo_cor(object):
         flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, [sza, vza, saa, vaa, elevation] = self._sort_emus_inputs()
         for i in [flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, sza, vza, saa, vaa, elevation]:
             if np.array(i).size == 0:
-                return 0, np.array([0,0,0]) # any empty array result in earlier leaving the estimation
+                return 0., np.array([0.,0.,0.]) # any empty array result in earlier leaving the estimation
         H0, dH = self.AEE.emulator_reflectance_atmosphere(flat_boa, flat_atmos, sza, vza, saa, vaa, elevation, bands=self.band_indexs)
         H0, dH = np.array(H0), np.array(dH)
         diff = (H0 - flat_toa) # order is important!
@@ -131,7 +131,7 @@ class atmo_cor(object):
         # instead of using scaler values 0.5, 0.5, 0.001 
         uncs = np.array([self.aot_unc, self.water_unc, self.ozone_unc])[...,None]
         if self.flat_atmos.size == 0:
-            return 0, np.array([0,0,0])
+            return 0., np.array([0.,0.,0.])
         if self.flat_prior.ndim == 1:
             J = 0.5 * (self.flat_atmos - self.flat_prior[...,None])**2/uncs**2
             full_dJ = (self.flat_atmos - self.flat_prior[...,None])/uncs**2
@@ -151,7 +151,7 @@ class atmo_cor(object):
         need to add first order regulization
         '''
         J  = 0
-        J_ = np.array([0,0,0])
+        J_ = np.array([0.,0.,0.])
         return J, J_
     def optimization(self,):
         '''

@@ -71,6 +71,7 @@ class solve_aerosol(object):
         self.s2_spectral_transform = [[ 1.06946607,  1.03048916,  1.04039226,  1.00163932,  1.00010918, 0.95607606,  0.99951677],
                                       [ 0.0035921 , -0.00142761, -0.00383504, -0.00558762, -0.00570695, 0.00861192,  0.00188871]]       
        
+        self.prior        =  0.2, 3.4, 0.35
     def _load_emus(self, sensor):
         AEE = AtmosphericEmulationEngine(sensor, self.emus_dir)
         up_bounds   = AEE.emulators[0].inputs[:,4:7].max(axis=0)
@@ -235,7 +236,7 @@ class solve_aerosol(object):
                                               (self.Hy+int(ys)>=0),
                                               (self.Hy+int(ys)<self.s2_full_res[0])))
         
-        self.Hx, self.Hy = self.Hx[shifted_mask], self.Hy[shifted_mask]
+        self.Hx, self.Hy = self.Hx[shifted_mask]+int(xs), self.Hy[shifted_mask]+int(ys)
         self.Lx, self.Ly = self.Lx[shifted_mask], self.Ly[shifted_mask]
         self.s2_boa      = self.s2_boa[:,shifted_mask]
         self.s2_boa_qa   = self.s2_boa_qa[:, shifted_mask]
@@ -285,7 +286,7 @@ class solve_aerosol(object):
         boa_qa    = self.s2_boa_qa[:, block_mask]
         mask      = self.s2_mask[block_mask]
         elevation = 0.5
-        prior     = 0.2, 3.4, 0.35
+        prior     = self.prior
         self.atmo = atmo_cor(self.s2_sensor, self.emus_dir, boa, toa, sza, vza, saa, vaa,\
                              elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130, 869],\
                              band_indexs=[1, 2, 3, 7, 11, 12, 8], mask=mask, prior=prior, subsample=1)

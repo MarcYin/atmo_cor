@@ -35,8 +35,8 @@ class grab_uncertainty(object):
         band_unc = np.zeros_like(self.modis_boa)		
         for i, band in enumerate(self.boa_band):
 	    band_unc[i] = np.maximum(self.mod09_band_unc_dict[band], generalised_unc[i])
-        brdf_unc = 1./(self.magic ** self.boa_qa)
-        self.boa_unc = band_unc*brdf_unc
+        brdf_unc = 0.05 * 1./(self.magic ** self.boa_qa) # the validation of BRDF has 0.05 uncertainty for QA=0
+        self.boa_unc = np.sqrt(band_unc**2 +  brdf_unc**2)
 	return self.boa_unc
 
 if __name__ == "__main__":

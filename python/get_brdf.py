@@ -2,6 +2,8 @@ import gdal
 import numpy as np
 import numpy.ma as ma
 import kernels
+from multiprocessing import Pool
+from functools import partial
 
 def r_modis(fname, slic=None):
     g = gdal.Open(fname)
@@ -57,11 +59,29 @@ def get_rs(modisQAs, modis_filenames, angles, bands = range(7)):
 def get_brdf_six(fname, angles, bands = (7,), flag=None, Linds = None):    
     temp1 = 'HDF4_EOS:EOS_GRID:"%s":MOD_Grid_BRDF:BRDF_Albedo_Parameters_Band%d'
     temp2 = 'HDF4_EOS:EOS_GRID:"%s":MOD_Grid_BRDF:BRDF_Albedo_Band_Mandatory_Quality_Band%d'
-    
+    p  =Pool(len(bands)*2)
+    fnames = [temp1%(fname, band) for band in bands] + [temp2%(fname, band) for band in bands]   
     kk = get_kk(angles)
     k_vol = kk.Ross
     k_geo = kk.Li
+    par = partial(r_modis, slic=Linds)
+    ret = p.map(par, fnames)
+    br, qa = np.array(ret[:7]), np.array(ret[7:])
+    if Linds is None:
+        brdf = br[:,0,:,:] + br[:,1,:,:]*k_vol + br[:,2,:,:]*k_geo
+    else:
+        brdf = br[:,0] + br[:,1]*k_vol + br[:,2]*k_geo
+    if flag==None:
+	return [brdf*0.001, qa]
+    else:
+	mask = (qa<=flag)
+	#val_brdf = brdf[:,mask]
+	#val_ins = np.array(Linds)[:,mask]
+	return [brdf*0.001, mask]
+
+    '''
     if Linds==None:
+        
         br = np.array([r_modis(temp1%(fname, band)) for band in bands])
         qa = np.array([r_modis(temp2%(fname, band)) for band in bands])
         #mask = (br[:,0,:,:] > 32766) | (br[:,1,:,:] > 32766) |(br[:,2,:,:] > 32766)
@@ -80,3 +100,25 @@ def get_brdf_six(fname, angles, bands = (7,), flag=None, Linds = None):
             #val_brdf = brdf[:,mask]
             #val_ins = np.array(Linds)[:,mask]
             return [brdf*0.001, mask]
+     '''
+
+if __name__=='__main__':
+    from multiprocessing import Pool
+    from functools import partial
+    p  =Pool(14)
+    fnames = ['HDF4_EOS:EOS_GRID:"%s":MOD_Grid_BRDF:BRDF_Albedo_Parameters_Band%d'%('/home/ucfafyi/DATA/S2_MODIS/m_data/MCD43A1.A2016311.h19v10.006.2016320215901.hdf', i) for i in range(1,8)]+\
+              ['HDF4_EOS:EOS_GRID:"%s":MOD_Grid_BRDF:BRDF_Albedo_Band_Mandatory_Quality_Band%d'%('/home/ucfafyi/DATA/S2_MODIS/m_data/MCD43A1.A2016311.h19v10.006.2016320215901.hdf', i) for i in range(1,8)]
+    par = partial(r_modis, slic = [range(2400), range(2400)])
+    ret = p.map(par, fnames)
+    val1 = get_brdf_six('/home/ucfafyi/DATA/S2_MODIS/m_data/MCD43A1.A2016311.h19v10.006.2016320215901.hdf',angles = [np.array(10),np.array(20),np.array(30)], bands=(1,2,3,4,5,6,7))
+    val2 = get_brdf_six('/home/ucfafyi/DATA/S2_MODIS/m_data/MCD43A1.A2016311.h19v10.006.2016320215901.hdf',angles = [np.array(10),np.array(20),np.array(30)], bands=(1,2,3,4,5,6,7), Linds = [np.arange(2400), np.arange(2400)])
+
+
+
+
+
+
+
+
+
+

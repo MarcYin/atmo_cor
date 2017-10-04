@@ -19,9 +19,9 @@ class grab_uncertainty(object):
         # using defult uncertainty values
         # for aot water and ozone from ECWMF
         # need to be unpdated later
-        self.aot_unc = 0.2
-        self.water_unc = 0.2
-        self.ozone_unc = 0.1  
+        self.aot_unc = 0.5
+        self.water_unc = 0.5
+        self.ozone_unc = 0.5  
     def get_boa_unc(self,):
         if self.modis_boa is None:
             raise IOError('modis_boa should be specified.')

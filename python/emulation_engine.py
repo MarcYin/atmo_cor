@@ -130,13 +130,25 @@ class AtmosphericEmulationEngine(object):
         files = glob.glob(os.path.join(emulator_folder, 
                 "*%s*.pkl" % sensor))
         files.sort()
-        for fich in files:
-            emulator_file = os.path.basename(fich)
-            # Create an emulator label (e.g. band name)
-            self.emulator_names = emulator_file
-            self.emulators.append ( cPickle.load(open(fich, 'r')))
-            log.info("Found file %s, storing as %s" %
-                        (fich, emulator_file))
+        try:
+            for fich in files:
+                emulator_file = os.path.basename(fich)
+                # Create an emulator label (e.g. band name)
+                self.emulator_names = emulator_file
+                log.info("Found file %s, storing as %s" %
+                            (fich, emulator_file))
+            from multiprocessing import Pool
+            p = Pool(len(files))
+            f = lambda fich: cPickle.load(open(fich, 'r'))
+            self.emulators = p.map(f, files)
+        except:
+	    for fich in files:
+		emulator_file = os.path.basename(fich)
+		# Create an emulator label (e.g. band name)
+		self.emulator_names = emulator_file
+		self.emulators.append ( cPickle.load(open(fich, 'r')))
+		log.info("Found file %s, storing as %s" %
+	   		    (fich, emulator_file))
         self.emulators = np.array(self.emulators).ravel()
         self.n_bands = len(self.emulators)
 
@@ -441,13 +453,26 @@ class RTEmulationEngine(object):
         files = glob.glob(os.path.join(emulator_folder, 
                 "%s*%s*.pkl" % (model, sensor)))
         files.sort()
-        for fich in files:
-            emulator_file = os.path.basename(fich)
-            # Create an emulator label (e.g. band name)
-            self.emulator_names = emulator_file
-            self.emulators.append ( cPickle.load(open(fich, 'r')))
-            log.info("Found file %s, storing as %s" %
-                        fich, emulator_file)
+        if len(files)>1:
+            for fich in files:
+                emulator_file = os.path.basename(fich)
+                # Create an emulator label (e.g. band name)
+                self.emulator_names = emulator_file
+                log.info("Found file %s, storing as %s" %
+                            (fich, emulator_file))
+            from multiprocessing import Pool
+            p = Pool(len(files))
+            f = lambda fich: cPickle.load(open(fich, 'r'))
+            self.emulators = p.map(f, files)
+        else:
+	    for fich in files:
+		emulator_file = os.path.basename(fich)
+		# Create an emulator label (e.g. band name)
+		self.emulator_names = emulator_file
+		self.emulators.append ( cPickle.load(open(fich, 'r')))
+		log.info("Found file %s, storing as %s" %
+			    (fich, emulator_file))
+        
         self.n_bands = len(self.emulators)
         
     def predict(self, x):

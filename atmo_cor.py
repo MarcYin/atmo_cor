@@ -158,7 +158,7 @@ class atmo_cor(object):
         An optimization function used for the retrieval of atmospheric parameters
         '''        
         p0     = self.prior 
-        psolve1 = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint=1, bounds=self.bounds,fprime=None)
+        psolve1 = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint=1, pgtol=1e-6,factr=1000, bounds=self.bounds,fprime=None)
         #psolve2 = optimize.fmin(self.fmin_cost, p0, full_output=True, maxiter=100, maxfun=150, disp=0)
         return psolve1#, psolve2
  

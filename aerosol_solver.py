@@ -16,7 +16,7 @@ from modis_l1b_reader import MODIS_L1b_reader
 import gdal
 from emulation_engine import AtmosphericEmulationEngine
 from psf_optimize import psf_optimize
-
+from multi_process import parmap
 
 class solve_aerosol(object):
     '''
@@ -183,9 +183,9 @@ class solve_aerosol(object):
     def s2_aerosol(self,):
         self.s2_sensor = 'MSI'
         self.s2 = read_s2(self.s2_toa_dir, self.s2_tile, self.year, self.month, self.day, self.s2_u_bands)
-	selected_img = self.s2.get_s2_toa() 
 	self.s2.get_s2_cloud()
-        
+	selected_img    = self.s2.get_s2_toa() 
+
         # find corresponding pixels between s2 and modis
         tiles = Find_corresponding_pixels(self.s2.s2_file_dir+'/B04.jp2', destination_res=500) 
         self.H_inds, self.L_inds = tiles['h%02dv%02d'%(self.h, self.v)]
@@ -218,7 +218,9 @@ class solve_aerosol(object):
                                                    bands=(3,4,1,2,6,7,2), Linds= [self.Lx, self.Ly])
         #self.s2_boa, self.s2_boa_qa = self.s2_boa.flatten(), self.s2_boa_qa.flatten()
         # apply the spectral transform...
-        self.s2_boa = self.s2_boa*np.array(self.s2_spectral_transform)[0,None].T + np.array(self.s2_spectral_transform)[1,None].T
+        self.s2_boa = self.s2_boa*np.array(self.s2_spectral_transform)[0,None].T + \
+                      np.array(self.s2_spectral_transform)[1,None].T
+
         # get the psf parameters
         if self.s2_psf is None:
             high_img    = np.repeat(np.repeat(selected_img['B12'], 2, axis=0), 2, axis=1)*0.0001
@@ -230,7 +232,7 @@ class solve_aerosol(object):
             print 'Solved PSF parameters are: ',xstd, ystd, ang, xs, ys, 'and the correlation is: ', 1-cos
         else:
             xstd, ystd, ang, xs, ys = self.s2_psf
-        # apply psf shifts without go out of the image extend  
+        # apply psf shifts without going out of the image extend  
         shifted_mask = np.logical_and.reduce(((self.Hx+int(xs)>=0),
                                               (self.Hx+int(xs)<self.s2_full_res[0]), 
                                               (self.Hy+int(ys)>=0),
@@ -241,24 +243,35 @@ class solve_aerosol(object):
         self.s2_boa      = self.s2_boa[:,shifted_mask]
         self.s2_boa_qa   = self.s2_boa_qa[:, shifted_mask]
         self.s2_angles   = self.s2_angles[:,:,shifted_mask]
+	self.s2.get_s2_cloud()
+
         # get the convolved toa reflectance
         self.valid_pixs = sum(shifted_mask) # count how many pixels is still within the s2 tile 
-        self.s2_toa = np.zeros((7, self.valid_pixs))
-        ker         = self.gaussian(xstd, ystd, ang) 
-        ker_size = 2*int(round(max(1.96*xstd, 1.96*ystd)))
-        self.bad_pixs = np.zeros(self.valid_pixs).astype(bool)
+        ker_size        = 2*int(round(max(1.96*xstd, 1.96*ystd)))
+        self.bad_pixs   = np.zeros(self.valid_pixs).astype(bool)
+        imgs = []
         for i, band in enumerate(self.s2_u_bands):
             if selected_img[band].shape != self.s2_full_res:
-                img = self.repeat_extend(selected_img[band], shape = self.s2_full_res)
+                selected_img[band] = self.repeat_extend(selected_img[band], shape = self.s2_full_res)
             else:
-                img = selected_img[band]
-            img[0,:] = img[-1,:] = img[:,0] = img[:,-1] = -9999
+                pass
+            selected_img[band][0,:]  = \
+            selected_img[band][-1,:] = \
+            selected_img[band][:,0]  = \
+            selected_img[band][:,-1] = -9999
+            imgs.append(selected_img[band])
             # filter out the bad pixels
-            self.bad_pixs |= cloud_dilation( (img <= 0) | self.s2.cloud | (img > 10000),\
-                                                iteration= ker_size/2)[self.Hx, self.Hy]
+            self.bad_pixs |= cloud_dilation(self.s2.cloud |\
+                                            (selected_img[band] <= 0) | \
+                                            (selected_img[band] >= 10000),\
+                                            iteration= ker_size/2)[self.Hx, self.Hy]
 
-            self.s2_toa[i] = signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]*0.0001
-        del selected_img; del self.s2.selected_img
+        ker = self.gaussian(xstd, ystd, ang) 
+        f   = lambda img: signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]*0.0001        
+
+        self.s2_toa = np.array(parmap(f,imgs))
+        del selected_img; del self.s2.selected_img; del imgs
+
         # get the valid value masks
         qua_mask = np.all(self.s2_boa_qa <= self.qa_thresh, axis = 0)
 
@@ -285,7 +298,7 @@ class solve_aerosol(object):
       	vaa, saa  = self.s2_angles[2:,:, block_mask]
         boa_qa    = self.s2_boa_qa[:, block_mask]
         mask      = self.s2_mask[block_mask]
-        elevation = 0.5
+        elevation = 0.05
         prior     = self.prior
         self.atmo = atmo_cor(self.s2_sensor, self.emus_dir, boa, toa, sza, vza, saa, vaa,\
                              elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130, 869],\

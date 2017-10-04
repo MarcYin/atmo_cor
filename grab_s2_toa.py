@@ -1,6 +1,8 @@
 #/usr/bin/env python
 import gdal
 import os
+import sys
+sys.path.insert(0, 'python')
 import xml.etree.ElementTree as ET
 import numpy as np
 from multiprocessing import Pool
@@ -34,7 +36,8 @@ class read_s2(object):
         self.month      = month
         self.day        = day
         self.bands      = bands # selected bands
-        self.s2_bands   = 'B01', 'B02', 'B03','B04','B05' ,'B06', 'B07', 'B08','B8A', 'B09', 'B10', 'B11', 'B12' #all bands
+        self.s2_bands   = 'B01', 'B02', 'B03','B04','B05' ,'B06', 'B07', \
+                          'B08','B8A', 'B09', 'B10', 'B11', 'B12' #all bands
         self.s2_file_dir = os.path.join(self.s2_toa_dir, self.s2_tile[:-3],\
                                         self.s2_tile[-3], self.s2_tile[-2:],\
                                         str(self.year), str(self.month), str(self.day),'0')
@@ -94,7 +97,8 @@ class read_s2(object):
             self.cloud = cl.cm
             g = gdal.Open(self.s2_file_dir+'/B04.jp2')
             driver = gdal.GetDriverByName('GTiff')
-            g1 = driver.Create(self.s2_file_dir+'/cloud.tiff', g.RasterXSize, g.RasterYSize, 1, gdal.GDT_Byte)
+            g1 = driver.Create(self.s2_file_dir+'/cloud.tiff', \
+                               g.RasterXSize, g.RasterYSize, 1, gdal.GDT_Byte)
 
             projection   = g.GetProjection()
             geotransform = g.GetGeoTransform()
@@ -107,7 +111,8 @@ class read_s2(object):
             g1=None; g=None
             del cl
         else:
-            self.cloud = cloud = gdal.Open(self.s2_file_dir+'/cloud.tiff').ReadAsArray().astype(bool)
+            self.cloud = cloud = gdal.Open(self.s2_file_dir+\
+                                           '/cloud.tiff').ReadAsArray().astype(bool)
         self.cloud_cover = 1.*self.cloud.sum()/self.cloud.size
 
     def get_s2_angles(self,reconstruct = True, slic = None):
@@ -148,7 +153,8 @@ class read_s2(object):
 			    vza_sub = []
 			    for x in m.findall('VALUES'):
 				vza_sub.append(x.text.split())
-			    bi, di, angles = k.attrib['bandId'], k.attrib['detectorId'], np.array(vza_sub).astype(float)
+			    bi, di, angles = k.attrib['bandId'], \
+                                             k.attrib['detectorId'], np.array(vza_sub).astype(float)
 			    vza[(int(bi),int(di))] = angles
 
 		    for n in k.findall('Azimuth'):
@@ -156,7 +162,8 @@ class read_s2(object):
 			    vaa_sub = []
 			    for p in o.findall('VALUES'):
 				vaa_sub.append(p.text.split())
-			    bi, di, angles =  k.attrib['bandId'], k.attrib['detectorId'], np.array(vaa_sub).astype(float)
+			    bi, di, angles = k.attrib['bandId'],\
+                                             k.attrib['detectorId'], np.array(vaa_sub).astype(float)
 			    vaa[(int(bi),int(di))] = angles
 
 		for mvia in j.findall('Mean_Viewing_Incidence_Angle_List'):
@@ -200,14 +207,16 @@ class read_s2(object):
 	    self.vaa[band] = vaa[band]
 	    self.mvz[band] = mvz_[band]
 	    self.mva[band] = mva_[band]
-	self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
+	self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
+                       'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
 
         if reconstruct:
             if len(glob(self.s2_file_dir + '/angles/VAA_VZA_*.img')) == 13:
                 pass
             else:
                 print 'Reconstructing Sentinel 2 angles...'
-                subprocess.call(['python', './python/s2a_angle_bands_mod.py', self.s2_file_dir+'/metadata.xml',  '1'])
+                subprocess.call(['python', './python/s2a_angle_bands_mod.py', \
+                                  self.s2_file_dir+'/metadata.xml',  '1'])
 
 	    if self.bands is None:
 		bands = self.s2_bands
@@ -226,13 +235,35 @@ class read_s2(object):
                     x_ind, y_ind = (np.array(slic)*resolution_ratio).astype(int)
                     self.vaa[band] = VAA[x_ind, y_ind]
                     self.vza[band] = VZA[x_ind, y_ind]
-            self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
+            self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
+                           'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
+
+    def get_wv(self,):
+	fname   = [self.s2_file_dir+'/%s.jp2'%i for i in ['B8A', 'B09']]
+	pool    = Pool(processes=len(fname))
+	b8a, b9 = pool.map(read_s2_band, fname)
+
+        b9  = np.repeat(np.repeat(b9, 3, axis=0), 3, axis=1) # repeat image to match the b8a
+        SOLAR_SPECTRAL_IRRADIANCE_B_8A = 955.19
+        SOLAR_SPECTRAL_IRRADIANCE_B_09 = 813.04	
+        #the same sun earth distance correction factors cancled out
+        CIBR = SOLAR_SPECTRAL_IRRADIANCE_B_8A/SOLAR_SPECTRAL_IRRADIANCE_B_09 * b8a/b9 
+        return CIBR
+        
+
+
+
 
 if __name__ == '__main__':
-    s2 = read_s2('/home/ucfafyi/DATA/S2_MODIS/s_data/', '18HXE', 2016, 5, 17, bands = ['B02', 'B03', 'B04', 'B08', 'B11'] )
+    
+    s2 = read_s2('/home/ucfafyi/DATA/S2_MODIS/s_data/', '18HXE', \
+                  2016, 5, 17, bands = ['B02', 'B03', 'B04', 'B08', 'B11'] )
+    '''
     s2.selected_img = s2.get_s2_toa() 
     s2.get_s2_cloud()
     s2.get_s2_angles()
-
+    '''
+    cibr = s2.get_wv()
+    
 
 

@@ -1,5 +1,7 @@
 import gdal
 from osgeo import osr 
+import numpy as np
+import numpy.ma as ma
 #gdalwarp -of VRT -t_srs "+proj=sinu" -te xmin ymin xmax ymax -ts 2400 2400 global_dem.vrt modis_cutoff.vrt
 
 class reproject_data(object):
@@ -42,14 +44,18 @@ class reproject_data(object):
             dstSRS.ImportFromWkt(raster_wkt)
             self.g = gdal.Warp('', self.source_img, format = 'MEM', outputBounds = \
                                [xmin, ymin, xmax, ymax], xRes = xRes, yRes = yRes, dstSRS = dstSRS)
-            self.data = self.g.ReadAsArray()
+            
         else:
             self.g = gdal.Warp('', self.source_img, format = 'MEM', outputBounds = \
                                [self.xmin, self.ymin, self.xmax, self.ymax], xRes = \
                                 self.xRes, yRes = self.yRes, dstSRS = self.dstSRS)
+        if self.g.RasterCount < 3:
             self.data = self.g.ReadAsArray()
-
+        else:
+            print 'There are %d bands in this file, use g.GetRasterBand(<band>) to avoid reading the whole file.'%self.g.RasterCount
 
 if __name__=='__main__':
     ele = reproject_data('/home/ucfafyi/DATA/S2_MODIS/SRTM/global_dem.vrt','/home/ucfafyi/DATA/S2_MODIS/s_data/29/S/QB/2016/12/23/0/B04.jp2') 
     ele.get_it()
+    mask = (ele.data == -32768) | (~np.isfinite(ele.data))
+    ele.data = ma.array(ele.data, mask = mask)

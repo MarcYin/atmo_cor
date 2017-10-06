@@ -106,7 +106,9 @@ class psf_optimize(object):
         max_val = [50,50]
         ps, distributions = create_training_set([ 'xs', 'ys'], min_val, max_val, n_train=50)
         self.shift_solved = parmap(self.shift_optimize, ps, nprocs=10)    
-        self.paras, self.costs = np.array([i[0] for i in self.shift_solved]),np.array([i[1] for i in self.shift_solved])
+        self.paras, self.costs = np.array([i[0] for i in self.shift_solved]), \
+                                           np.array([i[1] for i in self.shift_solved])
+
         xs, ys = self.paras[self.costs==self.costs.min()][0].astype(int)
         print 'Best shift is ', xs, ys, 'with the correlation of', 1-self.costs.min()
         return xs, ys

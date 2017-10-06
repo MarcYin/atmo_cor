@@ -336,7 +336,7 @@ class solve_aerosol(object):
         f   = lambda img: signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]*0.0001        
 
         self.s2_toa = np.array(parmap(f,imgs))
-        del selected_img; #del self.s2.selected_img; del imgs
+        del selected_img; del self.s2.selected_img; del imgs
 
         # get the valid value masks
         qua_mask = np.all(self.s2_boa_qa <= self.qa_thresh, axis = 0)
@@ -358,28 +358,28 @@ class solve_aerosol(object):
                                             (self.Hx < (i+1)*self.block_size),
                                             (self.Hy >= j*self.block_size),
                                             (self.Hy < (j+1)*self.block_size)))
-         
-        boa, toa  = self.s2_boa[:, block_mask], self.s2_toa[:, block_mask]
-	vza, sza  = self.s2_angles[:2,:, block_mask]*np.pi/180. 
-
-        boa_qa    = self.s2_boa_qa[:, block_mask]
-        mask      = self.s2_mask[block_mask]
-        elevation = self.elevation[block_mask]
-        prior     = self.s2_aod550[block_mask], self.s2_tcwv[block_mask], self.s2_tco3[block_mask]
-        self.atmo = atmo_cor(self.s2_sensor, self.emus_dir, boa, toa, sza, vza, saa, vaa,\
-                             elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130, 869],\
-                             band_indexs=[1, 2, 3, 7, 11, 12, 8], mask=mask, prior=prior, subsample=1)
-
-        self.atmo._load_unc()
-        self.atmo.aod_unc   = self.s2_aod550_unc[block_mask]
-        self.atmo.wv_unc    = self.s2_tcwv_unc[block_mask]
-        self.atmo.ozone_unc = self.s2_tco3_unc[block_mask]
-        self.atmo.AEE       = self.s2_AEE
-        self.atmo.bounds    = self.s2_bounds
-
+        mask = self.s2_mask[block_mask]
         if mask.sum() <= 0:
             print 'No valid values in block %03d-%03d'%(i,j)
         else:
+	    boa, toa  = self.s2_boa[:, block_mask], self.s2_toa[:, block_mask]
+	    vza, sza  = self.s2_angles[:2,:, block_mask]*np.pi/180. 
+	    vaa, saa  = self.s2_angles[2:,:, block_mask]
+	    boa_qa    = self.s2_boa_qa[:, block_mask]
+	    elevation = self.elevation[block_mask]
+	    prior     = self.s2_aod550[block_mask].mean(), \
+                        self.s2_tcwv[block_mask].mean(), self.s2_tco3[block_mask].mean()
+               
+	    self.atmo = atmo_cor(self.s2_sensor, self.emus_dir, boa, toa, sza, vza, saa, vaa,\
+				 elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130, 869],\
+                             band_indexs=[1, 2, 3, 7, 11, 12, 8], mask=mask, prior=prior, subsample=1)
+
+	    self.atmo._load_unc()
+	    self.atmo.aod_unc   = self.s2_aod550_unc[block_mask].max()
+	    self.atmo.wv_unc    = self.s2_tcwv_unc[block_mask].max() * 5 # inflating it..
+	    self.atmo.ozone_unc = self.s2_tco3_unc[block_mask].max()
+	    self.atmo.AEE       = self.s2_AEE
+	    self.atmo.bounds    = self.s2_bounds
             self.s2_solved.append([i,j, self.atmo.optimization()])
 
 if __name__ == "__main__":

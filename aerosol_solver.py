@@ -33,7 +33,7 @@ class solve_aerosol(object):
                  s2_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/s_data/',
                  l8_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/l_data/',
                  global_dem  = '/home/ucfafyi/DATA/Multiply/eles/global_dem.vrt',
-                 wv_emus_dir = '/home/ucfafyi/DATA/Multiply/Atmo_cor/data/wv_msi_retrieval.pkl',
+                 wv_emus_dir = '/home/ucfafyi/DATA/Multiply/Atmo_cor/data/wv_msi_retrieval_NEW.pkl',
                  cams_dir    = '/home/ucfafyi/DATA/Multiply/cams/',
                  s2_tile     = '29SQB',
                  l8_tile     = (204,33),
@@ -203,17 +203,17 @@ class solve_aerosol(object):
         # prepare for the angles and simulate the surface reflectance
         self.s2.get_s2_angles(self.reconstruct_s2_angle, slic = [self.Hx, self.Hy])
         if self.reconstruct_s2_angle:
-	    self.s2_angles = np.zeros((4, 7, len(self.Hx)))
+	    self.s2_angles = np.zeros((4, 6, len(self.Hx)))
             hx, hy = (self.Hx*23/10980.).astype(int), (self.Hy*23/10980.).astype(int) # index the 23*23 sun angles
-            for j, band in enumerate (self.s2_u_bands[:-1]):
+            for j, band in enumerate (self.s2_u_bands[:-2]):
                 self.s2_angles[[0,2],j,:] = self.s2.angles['vza'][band]/100.,  self.s2.angles['vaa'][band]/100. 
                 self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy],self.s2.angles['saa'][hx, hy]
 
         else:
-            self.s2_angles = np.zeos((4, 7, len(self.Hx)))
+            self.s2_angles = np.zeos((4, 6, len(self.Hx)))
             self.s2_angles[[1,-1],...] = self.s2.angles['msz'], self.s2.angles['msa']
             for i, angle in [[0,'mvz'], [2,'mva']]:
-                for j, band in enumerate (self.s2_u_bands[:-1]):
+                for j, band in enumerate (self.s2_u_bands[:-2]):
                     self.s2_angles[i][j] = self.s2.angles[angle][band]
 
         # use mean value to fill bad values
@@ -224,12 +224,12 @@ class solve_aerosol(object):
 	raa      = self.s2_angles[2] - self.s2_angles[3]
 
         # get the simulated surface reflectance
-        self.s2_boa, self.s2_boa_qa = get_brdf_six(self.mcd43_file, angles=[vza, sza, raa],\
-                                                   bands=(3,4,1,2,6,7,2), Linds= [self.Lx, self.Ly])
+        self.s2_boa, self.s2_boa_qa,self.test_unc = get_brdf_six(self.mcd43_file, angles=[vza, sza, raa],\
+                                                   bands=(3,4,1,2,6,7), Linds= [self.Lx, self.Ly])
         #self.s2_boa, self.s2_boa_qa = self.s2_boa.flatten(), self.s2_boa_qa.flatten()
         # apply the spectral transform...
-        self.s2_boa = self.s2_boa*np.array(self.s2_spectral_transform)[0,None].T + \
-                      np.array(self.s2_spectral_transform)[1,None].T
+        self.s2_boa = self.s2_boa*np.array(self.s2_spectral_transform)[0,:-1][...,None] + \
+                      np.array(self.s2_spectral_transform)[1,:-1][...,None]
 
         # get elevation
         ele = reproject_data(self.global_dem, self.s2.s2_file_dir+'/B04.jp2')
@@ -310,13 +310,14 @@ class solve_aerosol(object):
         self.s2_aod550_unc = self.s2_aod550_unc[shifted_mask]
         self.s2_tcwv_unc   = self.s2_tcwv_unc[shifted_mask]
         self.s2_tco3_unc   = self.s2_tco3_unc[shifted_mask]
+        self.test_unc      = self.test_unc[:,shifted_mask]
 
         # get the convolved toa reflectance
         self.valid_pixs = sum(shifted_mask) # count how many pixels is still within the s2 tile 
         ker_size        = 2*int(round(max(1.96*xstd, 1.96*ystd)))
         self.bad_pixs   = np.zeros(self.valid_pixs).astype(bool)
         imgs = []
-        for i, band in enumerate(self.s2_u_bands[:-1]):
+        for i, band in enumerate(self.s2_u_bands[:-2]):
             if selected_img[band].shape != self.s2_full_res:
                 selected_img[band] = self.repeat_extend(selected_img[band], shape = self.s2_full_res)
             else:
@@ -331,12 +332,11 @@ class solve_aerosol(object):
                                             (selected_img[band] <= 0) | \
                                             (selected_img[band] >= 10000),\
                                             iteration= ker_size/2)[self.Hx, self.Hy]
-
+        del selected_img; del self.s2.selected_img;
         ker = self.gaussian(xstd, ystd, ang) 
-        f   = lambda img: signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]*0.0001        
-
+        f   = lambda img: signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]*0.0001 
         self.s2_toa = np.array(parmap(f,imgs))
-        del selected_img; del self.s2.selected_img; del imgs
+        del imgs
 
         # get the valid value masks
         qua_mask = np.all(self.s2_boa_qa <= self.qa_thresh, axis = 0)
@@ -371,8 +371,8 @@ class solve_aerosol(object):
                         self.s2_tcwv[block_mask].mean(), self.s2_tco3[block_mask].mean()
                
 	    self.atmo = atmo_cor(self.s2_sensor, self.emus_dir, boa, toa, sza, vza, saa, vaa,\
-				 elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130, 869],\
-                             band_indexs=[1, 2, 3, 7, 11, 12, 8], mask=mask, prior=prior, subsample=1)
+				 elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130],\
+                             band_indexs=[1, 2, 3, 7, 11, 12], mask=mask, prior=prior, subsample=1)
 
 	    self.atmo._load_unc()
 	    self.atmo.aod_unc   = self.s2_aod550_unc[block_mask].max()
@@ -380,7 +380,7 @@ class solve_aerosol(object):
 	    self.atmo.ozone_unc = self.s2_tco3_unc[block_mask].max()
 	    self.atmo.AEE       = self.s2_AEE
 	    self.atmo.bounds    = self.s2_bounds
-            self.s2_solved.append([i,j, self.atmo.optimization()])
+            self.s2_solved.append([i,j, self.atmo.optimization(), prior])
 
 if __name__ == "__main__":
     aero = solve_aerosol(17,5,2017, 230)

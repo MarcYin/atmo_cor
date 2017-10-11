@@ -80,14 +80,17 @@ def get_brdf_six(fname, angles, bands = (7,), Linds = None, do_unc = True):
 	day_before = [(date - timedelta(days = i)).strftime('A%Y%j') for i in range(1,4)]
 	day_after  = [(date + timedelta(days = i)).strftime('A%Y%j') for i in range(1,4)]
 	finder = fname.split('MCD43A1')[0] + 'MCD43A1.%s.' + fname.split('.')[-4] +'.006.*hdf'
-	before_f = [glob(finder%i)[0] for i in day_before]
-	after_f =  [glob(finder%i)[0] for i in day_after]
-        fnames = [temp1%(beforef, band) for day in beforef for band in bands] + [temp1%(afterf, band) for afterf in after_f for band in bands]
-        p  =Pool(len(bands)*2)
+	before_f = sorted([glob(finder%i)[0] for i in day_before])
+	after_f =  sorted([glob(finder%i)[0] for i in day_after])
+        fnames = [temp1%(beforef, band) for beforef in before_f for band in bands] + \
+                 [temp1%(afterf, band) for afterf in after_f for band in bands]
+
+        p   = Pool(len(bands)*2)
         par = partial(r_modis, slic=Linds)
         ret = p.map(par, fnames)
-        all_br = np.r_[np.array(ret).reshape((6,len(band),3)+ret[0].shape[1:]), br[None,len(band),3,..]]
-        std = np.std([all_br, axis=0)
+        all_br = np.r_[np.array(ret).reshape((6,len(bands),3) + \
+                       ret[0].shape[1:]), br.reshape((1,) + br.shape)]
+        std = np.std(all_br, axis=0)
         if Linds is None:
             unc = np.sqrt(std[:,0,:,:]**2 + (std[:,1,:,:]**2)*k_vol**2 + (std[:,2,:,:]**2)*k_geo**2)
             

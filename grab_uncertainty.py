@@ -6,12 +6,14 @@ class grab_uncertainty(object):
     '''
     def __init__(self, modis_boa = None, 
 		       boa_band  = None, 
-		       boa_qa    = None
+		       boa_qa    = None,
+                       brdf_std  = None,
 		       ):
         
         self.modis_boa = modis_boa
         self.boa_band  = boa_band
         self.boa_qa    = boa_qa
+        self.brdf_std  = brdf_std
         mod09_band = [645,869,469,555,1240,1640,2130]
         mod09_band_unc = 0.0085, 0.0246, 0.0055, 0.0085, 0.0179, 0.0125, 0.0087
         self.mod09_band_unc_dict = dict(zip(mod09_band, mod09_band_unc))
@@ -36,7 +38,7 @@ class grab_uncertainty(object):
         for i, band in enumerate(self.boa_band):
 	    band_unc[i] = np.maximum(self.mod09_band_unc_dict[band], generalised_unc[i])
         brdf_unc = 0.05 * 1./(self.magic ** self.boa_qa) # the validation of BRDF has 0.05 uncertainty for QA=0
-        self.boa_unc = np.sqrt(band_unc**2 +  brdf_unc**2)
+        self.boa_unc = np.sqrt(band_unc**2 + brdf_unc**2, self.brdf_std**2)
 	return self.boa_unc
 
 if __name__ == "__main__":

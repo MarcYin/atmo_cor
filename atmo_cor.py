@@ -20,6 +20,7 @@ class atmo_cor(object):
                        boa_qa, boa_bands,
                        band_indexs, 
                        mask,prior,
+                       brdf_std,
                        atmosphere = None, 
                        subsample  = None,
                        subsample_start = 0,
@@ -40,6 +41,7 @@ class atmo_cor(object):
         self.band_indexs   =  band_indexs
         self.mask          = mask
         self.prior         = prior
+        self.brdf_std      = brdf_std
         if subsample is None:
             self.subsample = 1
         else:
@@ -53,7 +55,7 @@ class atmo_cor(object):
         self.bounds = np.array([low_bounds, up_bounds]).T 
 
     def _load_unc(self):
-        uc = grab_uncertainty(self.boa, self.boa_bands, self.boa_qa )
+        uc = grab_uncertainty(self.boa, self.boa_bands, self.boa_qa, self.brdf_std)
         self.boa_unc   = uc.get_boa_unc()
         self.aot_unc   = uc.aot_unc
         self.water_unc = uc.water_unc
@@ -205,9 +207,11 @@ if __name__ == "__main__":
     boa_qa = np.random.choice([0,1,255], size=(4,100,100))
     mask,prior = np.zeros((100, 100)).astype(bool), [0.2, 3, 0.3]
     mask[:50,:50] = True
+    brdf_std = np.zeros_loke(boa)
+    brdf_std[:] = 0.01
     atmo = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
                      toa,0.5,0.5,10,10,0.5, boa_qa, boa_bands=[645,869,469,555], \
-                     band_indexs=[3,7,1,2], mask=mask, prior=prior, atmosphere=atmosphere)
+                     band_indexs=[3,7,1,2], mask=mask, prior=prior, atmosphere=atmosphere, brdf_std = brdf_std)
 
     atmo._load_emus()
     atmo._load_unc()

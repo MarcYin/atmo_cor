@@ -93,10 +93,6 @@ class solve_aerosol(object):
         bounds = np.array([low_bounds, up_bounds]).T
         return AEE, bounds
 
-    def _load_inverse_emus(self, sensor):
-        AEE = AtmosphericEmulationEngine(sensor, self.inverse_emu)
-        return AEE
-
     def prepare_modis(self,):
         
         modis_l1b       = MODIS_L1b_reader(self.mod_l1b_dir, "h%02dv%02d"%(self.h,self.v),self.year)
@@ -397,7 +393,7 @@ class solve_aerosol(object):
             xres, yres = self.block_size*10, self.block_size*10
             geotransform = (xmin, xres, 0, ymax, 0, -yres)
             nx, ny = smed.shape
-            dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+'/%s.tif'%para_names[i], ny, nx, 1, gdal.GDT_Byte)
+            dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+'/%s.tif'%para_names[i], ny, nx, 1, gdal.GDT_Float32)
             dst_ds.SetGeoTransform(geotransform)    # specify coords
             dst_ds.SetProjection(projection) # export coords to file
             dst_ds.GetRasterBand(1).WriteArray(smed)

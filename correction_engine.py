@@ -142,8 +142,22 @@ class atmospheric_correction(object):
                              self._20meter_saa, self._20meter_vaa, self._20meter_aod,\
                              self._20meter_tcwv, self._20meter_tco3, self._20meter_ele,\
                              self._20meter_band_indexs)
+        g = gdal.Open(self.s2.s2_file_dir+'/20meter.vrt')
+        xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
+        projection = g.GetProjection()
+        for i,band in enumerate(['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']):
+           xres, yres = 20, 20
+           geotransform = (xmin, xres, 0, ymax, 0, -yres)
+           nx, ny = 5490, 5490
+           dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
+                                '/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
 
-
+           dst_ds.SetGeoTransform(geotransform)    # specify coords
+           dst_ds.SetProjection(projection) # export coords to file
+           dst_ds.GetRasterBand(1).WriteArray(self.boa[i])
+           dst_ds.FlushCache()                     # write to disk
+           dst_ds = None
+           self.sur_refs[band] = self.boa[i]
 
         self.logger.info('Doing 60 meter bands')
         self._60meter_ref = [all_refs[band]/10000. for band \
@@ -168,7 +182,22 @@ class atmospheric_correction(object):
                              self._60meter_saa, self._60meter_vaa, self._60meter_aod,\
                              self._60meter_tcwv, self._60meter_tco3, self._60meter_ele,\
                              self._60meter_band_indexs)
+        g = gdal.Open(self.s2.s2_file_dir+'/60meter.vrt')
+        xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
+        projection = g.GetProjection()
+        for i,band in enumerate(['B01', 'B09', 'B10']):
+           xres, yres = 60, 60
+           geotransform = (xmin, xres, 0, ymax, 0, -yres)
+           nx, ny = 1830, 1830
+           dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
+                                '/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
 
+           dst_ds.SetGeoTransform(geotransform)    # specify coords
+           dst_ds.SetProjection(projection) # export coords to file
+           dst_ds.GetRasterBand(1).WriteArray(self.boa[i])
+           dst_ds.FlushCache()                     # write to disk
+           dst_ds = None
+           self.sur_refs[band] = self.boa[i]
 
         del all_refs; del self.s2.selected_img; del all_angs; del self.s2.angles
                

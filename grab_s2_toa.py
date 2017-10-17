@@ -224,6 +224,19 @@ class read_s2(object):
 		bands = self.bands
 
             self.vaa = {}; self.vza = {}
+            fname = [self.s2_file_dir+'/angles/VAA_VZA_%s.img'%band for band in bands]
+            pool = Pool(processes=len(fname))
+            ret = pool.map(read_s2_band, fname)
+            for i,angs in enumerate(ret):
+                if slic is None:
+                    self.vaa[bands[i]] = angs[0]
+                    self.vza[bands[i]] = angs[1]
+                else:
+                    resolution_ratio = VAA.shape[0]/10980
+                    x_ind, y_ind = (np.array(slic)*resolution_ratio).astype(int)
+                    self.vaa[band[i]] = angs[0][x_ind, y_ind]
+                    self.vza[band[i]] = angs[1][x_ind, y_ind]
+            '''
 	    for band in bands:
 		g = gdal.Open(self.s2_file_dir + '/angles/VAA_VZA_%s.img'%band)
                 VAA, VZA = g.GetRasterBand(1).ReadAsArray(), g.GetRasterBand(2).ReadAsArray()
@@ -235,6 +248,7 @@ class read_s2(object):
                     x_ind, y_ind = (np.array(slic)*resolution_ratio).astype(int)
                     self.vaa[band] = VAA[x_ind, y_ind]
                     self.vza[band] = VZA[x_ind, y_ind]
+            '''  
             self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
                            'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
 
@@ -256,13 +270,14 @@ class read_s2(object):
 
 if __name__ == '__main__':
     
-    s2 = read_s2('/home/ucfafyi/DATA/S2_MODIS/s_data/', '18HXE', \
-                  2016, 5, 17, bands = ['B02', 'B03', 'B04', 'B08', 'B11'] )
+    s2 = read_s2('/home/ucfafyi/DATA/S2_MODIS/s_data/', '29SQB', \
+                  2017, 9, 4, bands = ['B02', 'B03', 'B04', 'B08', 'B11'] )
     '''
     s2.selected_img = s2.get_s2_toa() 
     s2.get_s2_cloud()
-    s2.get_s2_angles()
     '''
+    s2.get_s2_angles()
+    
     cibr = s2.get_wv()
     
 

@@ -84,7 +84,6 @@ class atmospheric_correction(object):
                                       axis=0), int(10980/23)+1, axis=1)[:10980, :10980]
         self._10meter_saa = np.repeat(np.repeat(self.saa, int(10980/23)+1, \
                                       axis=0), int(10980/23)+1, axis=1)[:10980, :10980]
-
         self.logger.info('Getting control variables for 10 meters bands.')
         self._10meter_aod, self._10meter_tcwv, self._10meter_tco3,\
                            self._10meter_ele = self.get_control_variables('B04')
@@ -107,7 +106,6 @@ class atmospheric_correction(object):
 	   nx, ny = 10980, 10980
 	   dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
 				'/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
-	   
 	   dst_ds.SetGeoTransform(geotransform)    # specify coords
 	   dst_ds.SetProjection(projection) # export coords to file
 	   dst_ds.GetRasterBand(1).WriteArray(self.boa[i])
@@ -151,7 +149,6 @@ class atmospheric_correction(object):
            nx, ny = 5490, 5490
            dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
                                 '/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
-
            dst_ds.SetGeoTransform(geotransform)    # specify coords
            dst_ds.SetProjection(projection) # export coords to file
            dst_ds.GetRasterBand(1).WriteArray(self.boa[i])
@@ -160,12 +157,12 @@ class atmospheric_correction(object):
            self.sur_refs[band] = self.boa[i]
 
         self.logger.info('Doing 60 meter bands')
-        self._60meter_ref = [all_refs[band]/10000. for band \
-                             in ['B01', 'B09', 'B10']]
-        self._60meter_vza = [all_angs['vza'][band]/100. for band
-                             in ['B01', 'B09', 'B10']]
-        self._60meter_vaa = [all_angs['vaa'][band]/100. for band
-                             in ['B01', 'B09', 'B10']]
+        self._60meter_ref = np.array([all_refs[band]/10000. for band \
+                                      in ['B01', 'B09', 'B10']])
+        self._60meter_vza = np.array([all_angs['vza'][band]/100. for band
+                                      in ['B01', 'B09', 'B10']])
+        self._60meter_vaa = np.array([all_angs['vaa'][band]/100. for band
+                                      in ['B01', 'B09', 'B10']])
         self._60meter_sza = np.repeat(np.repeat(self.sza, int(1830/23)+1, axis=0), int(1830/23)+1, axis=1)[:1830, :1830]
         self._60meter_saa = np.repeat(np.repeat(self.saa, int(1830/23)+1, axis=0), int(1830/23)+1, axis=1)[:1830, :1830]
 

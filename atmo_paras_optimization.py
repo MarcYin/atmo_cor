@@ -6,7 +6,7 @@ from emulation_engine import AtmosphericEmulationEngine
 from grab_uncertainty import grab_uncertainty
 from scipy import optimize 
 
-class atmo_cor(object):
+class solving_atmo_paras(object):
     '''
     A class taking the toa, boa, initial [aot, water, ozone], [vza, sza, vaa, saa], elevation and emulators
     to do the atmospheric parameters retrival and do the atmopsheric correction.  
@@ -155,12 +155,14 @@ class atmo_cor(object):
         J  = 0
         J_ = np.array([0.,0.,0.])
         return J, J_
+
     def optimization(self,):
         '''
         An optimization function used for the retrieval of atmospheric parameters
         '''        
         p0     = self.prior 
-        psolve1 = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint=1, pgtol=1e-6,factr=1000, bounds=self.bounds,fprime=None)
+        psolve1 = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint=-1, \
+                                         pgtol=1e-6,factr=1000, bounds=self.bounds,fprime=None)
         #psolve2 = optimize.fmin(self.fmin_cost, p0, full_output=True, maxiter=100, maxfun=150, disp=0)
         return psolve1#, psolve2
  
@@ -190,8 +192,6 @@ class atmo_cor(object):
 
         return J
 
-
-
 if __name__ == "__main__":
     boa = np.random.rand(4,100,100)
     boa[:] = 0.2
@@ -209,9 +209,9 @@ if __name__ == "__main__":
     mask[:50,:50] = True
     brdf_std = np.zeros_loke(boa)
     brdf_std[:] = 0.01
-    atmo = atmo_cor('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
-                     toa,0.5,0.5,10,10,0.5, boa_qa, boa_bands=[645,869,469,555], \
-                     band_indexs=[3,7,1,2], mask=mask, prior=prior, atmosphere=atmosphere, brdf_std = brdf_std)
+    atmo = solving_atmo_paras('MSI', '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',boa, \
+                             toa,0.5,0.5,10,10,0.5, boa_qa, boa_bands=[645,869,469,555], \
+                             band_indexs=[3,7,1,2], mask=mask, prior=prior, atmosphere=atmosphere, brdf_std = brdf_std)
 
     atmo._load_emus()
     atmo._load_unc()

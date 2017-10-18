@@ -232,10 +232,10 @@ class read_s2(object):
                     self.vaa[bands[i]] = angs[0]
                     self.vza[bands[i]] = angs[1]
                 else:
-                    resolution_ratio = VAA.shape[0]/10980
+                    resolution_ratio = angs[0].shape[0]/10980
                     x_ind, y_ind = (np.array(slic)*resolution_ratio).astype(int)
-                    self.vaa[band[i]] = angs[0][x_ind, y_ind]
-                    self.vza[band[i]] = angs[1][x_ind, y_ind]
+                    self.vaa[bands[i]] = angs[0][x_ind, y_ind]
+                    self.vza[bands[i]] = angs[1][x_ind, y_ind]
             '''
 	    for band in bands:
 		g = gdal.Open(self.s2_file_dir + '/angles/VAA_VZA_%s.img'%band)
@@ -263,10 +263,6 @@ class read_s2(object):
         #the same sun earth distance correction factors cancled out
         CIBR = SOLAR_SPECTRAL_IRRADIANCE_B_8A/SOLAR_SPECTRAL_IRRADIANCE_B_09 * b8a/b9 
         return CIBR
-        
-
-
-
 
 if __name__ == '__main__':
     
@@ -277,8 +273,4 @@ if __name__ == '__main__':
     s2.get_s2_cloud()
     '''
     s2.get_s2_angles()
-    
     cibr = s2.get_wv()
-    
-
-

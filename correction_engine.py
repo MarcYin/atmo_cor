@@ -96,7 +96,8 @@ class atmospheric_correction(object):
         self.fire_correction(self._10meter_ref, self._10meter_sza, self._10meter_vza,\
                              self._10meter_saa, self._10meter_vaa, self._10meter_aod,\
                              self._10meter_tcwv, self._10meter_tco3, self._10meter_ele,\
-                             self._10meter_band_indexs)       
+                             self._10meter_band_indexs)     
+        '''  
         g = gdal.Open(self.s2.s2_file_dir+'/10meter.vrt')
         xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
         projection = g.GetProjection()
@@ -112,7 +113,10 @@ class atmospheric_correction(object):
 	   dst_ds.FlushCache()                     # write to disk
 	   dst_ds = None
            self.sur_refs[band] = self.boa[i]
-		  
+        '''
+	self.sur_refs.update(dict(zip(['B02', 'B03', 'B04', 'B08'], self.boa)))
+        self._save_img(self.boa,['B02', 'B03', 'B04', 'B08'])
+	  
         self.logger.info('Doing 20 meter bands')
         self._20meter_ref = np.array([all_refs[band]/10000. for band \
                                       in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
@@ -140,6 +144,7 @@ class atmospheric_correction(object):
                              self._20meter_saa, self._20meter_vaa, self._20meter_aod,\
                              self._20meter_tcwv, self._20meter_tco3, self._20meter_ele,\
                              self._20meter_band_indexs)
+        '''
         g = gdal.Open(self.s2.s2_file_dir+'/20meter.vrt')
         xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
         projection = g.GetProjection()
@@ -154,7 +159,10 @@ class atmospheric_correction(object):
            dst_ds.GetRasterBand(1).WriteArray(self.boa[i])
            dst_ds.FlushCache()                     # write to disk
            dst_ds = None
-           self.sur_refs[band] = self.boa[i]
+        '''
+        self.sur_refs.update(dict(zip(['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'], self.boa)))
+        self._save_img(self.boa, ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'])
+
 
         self.logger.info('Doing 60 meter bands')
         self._60meter_ref = np.array([all_refs[band]/10000. for band \
@@ -179,6 +187,7 @@ class atmospheric_correction(object):
                              self._60meter_saa, self._60meter_vaa, self._60meter_aod,\
                              self._60meter_tcwv, self._60meter_tco3, self._60meter_ele,\
                              self._60meter_band_indexs)
+        '''
         g = gdal.Open(self.s2.s2_file_dir+'/60meter.vrt')
         xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
         projection = g.GetProjection()
@@ -195,10 +204,29 @@ class atmospheric_correction(object):
            dst_ds.FlushCache()                     # write to disk
            dst_ds = None
            self.sur_refs[band] = self.boa[i]
-
+        '''
+        self.sur_refs.update(dict(zip(['B01', 'B09', 'B10'], self.boa)))
+        self._save_img(self.boa, ['B01', 'B09', 'B10'])
         del all_refs; del self.s2.selected_img; del all_angs; del self.s2.angles
-               
 
+    def _save_img(self, refs, bands):
+        g            = gdal.Open(self.s2.s2_file_dir+'/%s.jp2'%bands[0])
+        projection   = g.GetProjection()
+        geotransform = g.GetGeoTransform()
+        bands_refs   = zip(bands, refs)
+        f            = lambda band_ref: self._save_band(band_ref, projection = projection, geotransform = geotransform)
+        parmap(f, bands_refs)
+      
+    def _save_band(self, band_ref, projection, geotransform):
+        band, ref = band_ref
+        nx, ny = ref.shape
+        dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
+                                '/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
+        dst_ds.SetGeoTransform(geotransform)    
+        dst_ds.SetProjection(projection) 
+        dst_ds.GetRasterBand(1).WriteArray(ref)
+        dst_ds.FlushCache()                  
+        dst_ds = None
 
     def get_control_variables(self, target_band):
 
@@ -237,7 +265,7 @@ class atmospheric_correction(object):
         rows              = np.repeat(np.arange(self.num_blocks), self.num_blocks)
         columns           = np.tile(np.arange(self.num_blocks), self.num_blocks)
         blocks            = zip(rows, columns)
-        ret = parmap(self._s2_block_correction_6s, blocks,  nprocs=32)
+        ret = parmap(self._s2_block_correction_6s, blocks)
         #ret               = parmap(self._s2_block_correction_emus, blocks) 
         self.boa = np.array([i[2] for i in ret]).reshape(self.num_blocks, self.num_blocks, toa.shape[0], \
                              self.block_size, self.block_size).transpose(2,0,3,1,4).reshape(toa.shape[0], \
@@ -269,9 +297,9 @@ class atmospheric_correction(object):
         slice_x   = slice(i*self.block_size,(i+1)*self.block_size, 1)
         slice_y   = slice(j*self.block_size,(j+1)*self.block_size, 1)
 
-        toa       = self._toa      [:,slice_x,slice_y]
-        vza       = self._vza      [:,slice_x,slice_y]
-        vaa       = self._vaa      [:,slice_x,slice_y]
+        toa       = self._toa    [:,slice_x,slice_y]
+        vza       = self._vza    [:,slice_x,slice_y]
+        vaa       = self._vaa    [:,slice_x,slice_y]
         sza       = self._sza      [slice_x,slice_y]
         saa       = self._saa      [slice_x,slice_y]
         tcwv      = self._tcwv     [slice_x,slice_y]
@@ -305,9 +333,8 @@ class atmospheric_correction(object):
         tco3      = self._tco3     [slice_x,slice_y].ravel()
         aod       = self._aod      [slice_x,slice_y].ravel()
         elevation = self._elevation[slice_x,slice_y].ravel()/1000.
-
-        boa       = self.correction_engine(toa, sza, vza, saa, vaa, aod, tcwv, tco3, elevation, self._band_indexs)
-        
+        boa       = self.correction_engine(toa, sza, vza, saa, vaa, aod, tcwv, \
+                                           tco3, elevation, self._band_indexs)
         self.corrected.append([i, j, boa])
         
     def correction_engine(self, toa, sza, vza, saa, vaa, aod, tcwv, tco3, elevation, band_indexs):

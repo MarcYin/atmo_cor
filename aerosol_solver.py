@@ -272,11 +272,14 @@ class solve_aerosol(object):
 
         # try to get the tcwv from the eulation of sen2cor look up table
         try:
-            b8a, b9 = np.repeat(np.repeat(selected_img['B8A']*0.0001, 2, axis=0), 2, axis=1)[self.Hx, self.Hy],\
+            b8a, b9  = np.repeat(np.repeat(selected_img['B8A']*0.0001, 2, axis=0), 2, axis=1)[self.Hx, self.Hy],\
                                 np.repeat(np.repeat(selected_img['B09']*0.0001, 6, axis=0), 6, axis=1)[self.Hx, self.Hy]
-	    wv_emus = pkl.load(open(self.wv_emus_dir, 'rb'))
-	    inputs  = np.array([b9, b8a, vza[-1], sza[-1], abs(raa)[-1], self.elevation]).T
-	    self.s2_tcwv, self.s2_tcwv_unc, _ = wv_emus.predict(inputs, do_unc = True) 
+	    wv_emus   = pkl.load(open(self.wv_emus_dir, 'rb'))
+	    inputs    = np.array([b9, b8a, vza[-1], sza[-1], abs(raa)[-1], self.elevation]).T
+            tcwv_mask = b8a < 0.05 
+	    self.s2_tcwv, self.s2_tcwv_unc, _ = wv_emus.predict(inputs, do_unc = True)
+            self.s2_tcwv[tcwv_mask] = np.interp(np.flatnonzero( tcwv_mask), \
+                                                np.flatnonzero(~tcwv_mask), self.s2_tcwv[~tcwv_mask]) # simple interpolation
 	except:
             tcwv_file     = '/tcwv_' + ecmwf_time + '_global.tif'
             tcwv          = reproject_data(self.cams_dir + tcwv_file, self.s2.s2_file_dir+'/B04.jp2')
@@ -284,7 +287,7 @@ class solve_aerosol(object):
             tcwv_scale    = float(tcwv.g.GetMetadata()['tcwv#scale_factor'])
             tcwv_offset   = float(tcwv.g.GetMetadata()['tcwv#add_offset'])
             self.s2_tcwv  = (tcwv.data*tcwv_scale + tcwv_offset)[self.Hx, self.Hy]
-            self.s2_tcwv_unc = np.ones(self.tcwv.shape) * 0.2
+            self.s2_tcwv_unc = np.ones(self.s2_tcwv.shape) * 0.2
 
         # get the psf parameters
         if self.s2_psf is None:
@@ -462,6 +465,6 @@ class solve_aerosol(object):
         
 
 if __name__ == "__main__":
-    aero = solve_aerosol(17,5,2017, 230)
-    #aero.s2_aerosol()
-    solved  = aero.prepare_modis()
+    aero = solve_aerosol(17, 5, 2017, 247,mcd43_dir = '/home/ucfafyi/DATA/Multiply/MCD43/', emus_dir = '/home/ucfafyi/DATA/Multiply/', s2_tile='29SQB')
+    aero.s2_aerosol()
+    #solved  = aero.prepare_modis()

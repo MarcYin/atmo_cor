@@ -80,10 +80,10 @@ class atmospheric_correction(object):
                                       in ['B02', 'B03', 'B04', 'B08']])
         self._10meter_vaa = np.array([all_angs['vaa'][band]/100. for band
                                       in ['B02', 'B03', 'B04', 'B08']])
-        self._10meter_sza = np.repeat(np.repeat(self.sza, int(10980/23)+1, \
-                                      axis=0), int(10980/23)+1, axis=1)[:10980, :10980]
-        self._10meter_saa = np.repeat(np.repeat(self.saa, int(10980/23)+1, \
-                                      axis=0), int(10980/23)+1, axis=1)[:10980, :10980]
+        self._10meter_sza = np.repeat(np.repeat(self.sza, int(np.ceil(10980/23.)), \
+                                      axis=0), int(np.ceil(10980/23.)), axis=1)[:10980, :10980]
+        self._10meter_saa = np.repeat(np.repeat(self.saa, int(np.ceil(10980/23.)), \
+                                      axis=0), int(np.ceil(10980/23.)), axis=1)[:10980, :10980]
         self.logger.info('Getting control variables for 10 meters bands.')
         self._10meter_aod, self._10meter_tcwv, self._10meter_tco3,\
                            self._10meter_ele = self.get_control_variables('B04')
@@ -93,14 +93,17 @@ class atmospheric_correction(object):
         self._10meter_band_indexs = [1, 2, 3, 7]        
         self.rsr = [PredefinedWavelengths.S2A_MSI_02, PredefinedWavelengths.S2A_MSI_03, \
                     PredefinedWavelengths.S2A_MSI_04, PredefinedWavelengths.S2A_MSI_08 ]
-        self.logger.info('Fire correction.')
+        self.logger.info('Fire correction and splited into %d blocks.'%self._num_blocks**2)
         self.fire_correction(self._10meter_ref, self._10meter_sza, self._10meter_vza,\
                              self._10meter_saa, self._10meter_vaa, self._10meter_aod,\
                              self._10meter_tcwv, self._10meter_tco3, self._10meter_ele,\
                              self._10meter_band_indexs)     
+
+        del self._10meter_ref; del self._10meter_vza; del self._10meter_vaa;  del self._10meter_sza 
+        del self._10meter_saa; del self._10meter_aod; del self._10meter_tcwv; del self._10meter_tco3; del self._10meter_ele
         
 	self.sur_refs.update(dict(zip(['B02', 'B03', 'B04', 'B08'], self.boa)))
-        self._save_img(self.boa,['B02', 'B03', 'B04', 'B08'])
+        self._save_img(self.boa, ['B02', 'B03', 'B04', 'B08']); del self.boa 
 	  
         self.logger.info('Doing 20 meter bands')
         self._20meter_ref = np.array([all_refs[band]/10000. for band \
@@ -109,10 +112,10 @@ class atmospheric_correction(object):
                                       in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
         self._20meter_vaa = np.array([all_angs['vaa'][band]/100. for band
                                       in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
-        self._20meter_sza = np.repeat(np.repeat(self.sza, int(5490/23)+1, \
-                                      axis=0), int(5490/23)+1, axis=1)[:5490, :5490]
-        self._20meter_saa = np.repeat(np.repeat(self.saa, int(5490/23)+1, \
-                                      axis=0), int(5490/23)+1, axis=1)[:5490, :5490]
+        self._20meter_sza = np.repeat(np.repeat(self.sza, int(np.ceil(5490/23.)), \
+                                      axis=0), int(np.ceil(5490/23.)), axis=1)[:5490, :5490]
+        self._20meter_saa = np.repeat(np.repeat(self.saa, int(np.ceil(5490/23.)), \
+                                      axis=0), int(np.ceil(5490/23.)), axis=1)[:5490, :5490]
 
         self.logger.info('Getting control variables for 20 meters bands.')
         self._20meter_aod, self._20meter_tcwv, self._20meter_tco3,\
@@ -125,14 +128,17 @@ class atmospheric_correction(object):
                     PredefinedWavelengths.S2A_MSI_07, PredefinedWavelengths.S2A_MSI_09, \
                     PredefinedWavelengths.S2A_MSI_12, PredefinedWavelengths.S2A_MSI_13]
 
-        self.logger.info('Fire correction.')
+        self.logger.info('Fire correction and splited into %d blocks.'%self._num_blocks**2)
         self.fire_correction(self._20meter_ref, self._20meter_sza, self._20meter_vza,\
                              self._20meter_saa, self._20meter_vaa, self._20meter_aod,\
                              self._20meter_tcwv, self._20meter_tco3, self._20meter_ele,\
                              self._20meter_band_indexs)
-        self.sur_refs.update(dict(zip(['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'], self.boa)))
-        self._save_img(self.boa, ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'])
 
+        del self._20meter_ref; del self._20meter_vza; del self._20meter_vaa;  del self._20meter_sza
+        del self._20meter_saa; del self._20meter_aod; del self._20meter_tcwv; del self._20meter_tco3; del self._20meter_ele
+
+        self.sur_refs.update(dict(zip(['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'], self.boa)))
+        self._save_img(self.boa, ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']); del self.boa
 
         self.logger.info('Doing 60 meter bands')
         self._60meter_ref = np.array([all_refs[band]/10000. for band \
@@ -141,8 +147,10 @@ class atmospheric_correction(object):
                                       in ['B01', 'B09', 'B10']])
         self._60meter_vaa = np.array([all_angs['vaa'][band]/100. for band
                                       in ['B01', 'B09', 'B10']])
-        self._60meter_sza = np.repeat(np.repeat(self.sza, int(1830/23)+1, axis=0), int(1830/23)+1, axis=1)[:1830, :1830]
-        self._60meter_saa = np.repeat(np.repeat(self.saa, int(1830/23)+1, axis=0), int(1830/23)+1, axis=1)[:1830, :1830]
+        self._60meter_sza = np.repeat(np.repeat(self.sza, int(np.ceil(1830/23.)), \
+                                      axis=0), int(np.ceil(1830/23.)), axis=1)[:1830, :1830]
+        self._60meter_saa = np.repeat(np.repeat(self.saa, int(np.ceil(1830/23.)), \
+                                      axis=0), int(np.ceil(1830/23.)), axis=1)[:1830, :1830]
 
         self.logger.info('Getting control variables for 60 meters bands.')
         self._60meter_aod, self._60meter_tcwv, self._60meter_tco3,\
@@ -153,13 +161,17 @@ class atmospheric_correction(object):
         self._60meter_band_indexs = [0, 9, 10]
         self.rsr = [PredefinedWavelengths.S2A_MSI_01, PredefinedWavelengths.S2A_MSI_10, PredefinedWavelengths.S2A_MSI_11]
 
-        self.logger.info('Fire correction.')
+        self.logger.info('Fire correction and splited into %d blocks.'%self._num_blocks**2)
         self.fire_correction(self._60meter_ref, self._60meter_sza, self._60meter_vza,\
                              self._60meter_saa, self._60meter_vaa, self._60meter_aod,\
                              self._60meter_tcwv, self._60meter_tco3, self._60meter_ele,\
                              self._60meter_band_indexs)
+
+        del self._60meter_ref; del self._60meter_vza; del self._60meter_vaa;  del self._60meter_sza
+        del self._60meter_saa; del self._60meter_aod; del self._60meter_tcwv; del self._60meter_tco3; del self._60meter_ele
+
         self.sur_refs.update(dict(zip(['B01', 'B09', 'B10'], self.boa)))
-        self._save_img(self.boa, ['B01', 'B09', 'B10'])
+        self._save_img(self.boa, ['B01', 'B09', 'B10']); del self.boa
         del all_refs; del self.s2.selected_img; del all_angs; del self.s2.angles
 
     def _save_img(self, refs, bands):
@@ -225,6 +237,9 @@ class atmospheric_correction(object):
                              self._block_size, self._block_size).transpose(2,0,3,1,4).reshape(toa.shape[0], \
                              self._num_blocks*self._block_size, self._num_blocks*self._block_size)
                         
+        del self._toa; del self._sza; del self._vza;  del self._saa
+        del self._vaa; del self._aod; del self._tcwv; del self._tco3; del self._elevation
+
     def atm(self, p, RSR=None):
 	aod, tcwv, tco3, sza, vza, raa , elevation = p
 	path = '/home/ucfafyi/DATA/Multiply/6S/6SV2.1/sixsV2.1'
@@ -247,7 +262,7 @@ class atmospheric_correction(object):
 
     def _s2_block_correction_emus_xa_xb_xc(self, block):
         i, j      = block
-        self.logger.info('Block %03d--%03d'%(i,j))
+        self.logger.info('Block %03d--%03d'%(i+1,j+1))
         slice_x   = slice(i*self._block_size,(i+1)*self._block_size, 1)
         slice_y   = slice(j*self._block_size,(j+1)*self._block_size, 1)
 
@@ -291,7 +306,7 @@ class atmospheric_correction(object):
 
     def _s2_block_correction_emus_xa_xb_xc_(self, block):
         i, j      = block
-        self.logger.info('Block %03d--%03d'%(i,j))
+        self.logger.info('Block %03d--%03d'%(i+1,j+1))
         slice_x   = slice(i*self._block_size,(i+1)*self._block_size, 1)
         slice_y   = slice(j*self._block_size,(j+1)*self._block_size, 1)
 

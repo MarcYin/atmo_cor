@@ -3,24 +3,18 @@ import os
 import sys
 sys.path.insert(0, 'python')
 import gdal
-import json
 import datetime
 import logging
 import numpy as np
 from glob import glob
-from scipy import signal, ndimage
 import cPickle as pkl
 from smoothn import smoothn
-from grab_s2_toa import read_s2
 from multi_process import parmap
 from reproject import reproject_data
-from get_modis_toa import grab_modis_toa
 from get_brdf import get_brdf_six
 from atmo_paras_optimization import solving_atmo_paras
-from spatial_mapping import Find_corresponding_pixels, cloud_dilation
 from modis_l1b_reader import MODIS_L1b_reader
 from emulation_engine import AtmosphericEmulationEngine
-from psf_optimize import psf_optimize
 
 class solve_aerosol(object):
     '''
@@ -32,22 +26,13 @@ class solve_aerosol(object):
                  emus_dir    = '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',
                  mcd43_dir   = '/data/selene/ucfajlg/Ujia/MCD43/',
                  mod_l1b_dir = '/data/selene/ucfajlg/Ujia/MODIS_L1b/GRIDDED',
-                 s2_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/s_data/',
-                 l8_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/l_data/',
                  global_dem  = '/home/ucfafyi/DATA/Multiply/eles/global_dem.vrt',
-                 wv_emus_dir = '/home/ucfafyi/DATA/Multiply/Atmo_cor/data/wv_msi_retrieval_NEW.pkl',
                  cams_dir    = '/home/ucfafyi/DATA/Multiply/cams/',
-                 inverse_emu = '/home/ucfafyi/DATA/Multiply/inverse_emus/',
-                 s2_tile     = '29SQB',
-                 l8_tile     = (204,33),
-                 s2_psf      = [29.75, 39 , 0, 38, 40],
-                 l8_psf      = None,
                  qa_thresh   = 255,
                  mod_cloud   = None,
-                 verbose     = True,
                  save_file   = False,
                  aero_res    = None, # resolution for aerosol retrival in meters should be larger than 500
-                 reconstruct_s2_angle = True):
+                 ):
 
         self.year        = year 
         self.doy         = doy
@@ -62,29 +47,13 @@ class solve_aerosol(object):
         self.emus_dir    = emus_dir
         self.qa_thresh   = qa_thresh
         self.mod_cloud   = mod_cloud 
-        self.s2_toa_dir  = s2_toa_dir
-        self.l8_toa_dir  = l8_toa_dir
         self.global_dem  = global_dem
-        self.wv_emus_dir = wv_emus_dir
         self.cams_dir    = cams_dir
-        self.inverse_emu = inverse_emu
-        self.s2_tile     = s2_tile
-        self.l8_tile     = l8_tile
-        self.s2_psf      = s2_psf 
-        self.s2_u_bands  = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A', 'B09' #bands used for the atmo-cor
-        self.s2_full_res = (10980, 10980)
         self.m_subsample = 10
-        self.s_subsample = 1
         self.aero_res    = 3000
         mcd43_tmp        = '%s/MCD43A1.A%d%03d.h%02dv%02d.006.*.hdf'
         self.mcd43_file  = glob(mcd43_tmp%(self.mcd43_dir,\
                                  self.year, self.doy, self.h, self.v))[0]
-
-        self.reconstruct_s2_angle  = reconstruct_s2_angle
-        self.s2_spectral_transform = [[ 1.06946607,  1.03048916,  1.04039226,  1.00163932,  1.00010918, 0.95607606,  0.99951677],
-                                      [ 0.0035921 , -0.00142761, -0.00383504, -0.00558762, -0.00570695, 0.00861192,  0.00188871]]       
-       
-        self.prior        =  0.2, 3.4, 0.35
     def _load_emus(self, sensor):
         AEE = AtmosphericEmulationEngine(sensor, self.emus_dir)
         up_bounds   = AEE.emulators[0].inputs[:,4:7].max(axis=0)
@@ -93,50 +62,85 @@ class solve_aerosol(object):
         return AEE, bounds
 
     def prepare_modis(self,):
+        self.modis_logger = logging.getLogger('MODIS Atmospheric Correction')
+        self.modis_logger.setLevel(logging.INFO)
+        if not self.modis_logger.handlers:
+            ch = logging.StreamHandler()
+            ch.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            ch.setFormatter(formatter)
+            self.modis_logger.addHandler(ch)
+        self.modis_logger.propagate = False
         
-        modis_l1b       = MODIS_L1b_reader(self.mod_l1b_dir, "h%02dv%02d"%(self.h,self.v),self.year)
-        self.modis_files = [modis_l1b.granules[i] for i in modis_l1b.granules.keys() if i.date() == self.date.date()]
-        #self.modis_toa, self.modis_angles = grab_modis_toa(year=2006,doy=200,verbose=True,\
-        #                                                   mcd43file = self.mcd43_file, directory_l1b= self.mod_l1b_dir)
-        for modis_file in self.modis_files[1:2]:
-            band_files  = [getattr(modis_file, 'b%d'%band) for band in range(1,8)]
-            angle_files = [getattr(modis_file, ang) for ang in ['vza', 'sza', 'vaa', 'saa']]
-            modis_toa   = []
-            modis_angle = []
-            for band_file in band_files:
-                g = gdal.Open(band_file)
-                if g is None:
-                    raise IOError
-                else:
-                    data = g.ReadAsArray()
-                modis_toa.append(data)
-            for angle_file in angle_files:
-                g = gdal.Open(angle_file)
-                if g is None:
-                    raise IOError
-                else:
-                    data = g.ReadAsArray()
-                modis_angle.append(data)
+        self.modis_logger.info('Start to retrieve atmospheric parameters.')
+        modis_l1b        =  MODIS_L1b_reader(self.mod_l1b_dir, "h%02dv%02d"%(self.h,self.v),self.year)
+        self.modis_files = [(i,modis_l1b.granules[i)] for i in modis_l1b.granules.keys() if i.date() == self.date.date()]
+        self.modis_logger.info('%d MODIS file(s) is/are found for doy: %04d--%03d.'%(len(self.moids_files), self.year, self.doy))
+        for timestamp, modis_file in self.modis_files[1:2]:
+            self._doing_one_file(modis_file, timestamp)
 
-            scale  = np.array(modis_file.scale)
-            offset = np.array(modis_file.offset)
+    def _doing_one_file(self, modis_file, timestamp):
+        self.modis_logger.info('Doing %s.'%modis_file)
+	band_files  = [getattr(modis_file, 'b%d'%band) for band in range(1,8)]
+	angle_files = [getattr(modis_file, ang) for ang in ['vza', 'sza', 'vaa', 'saa']]
+	modis_toa   = []
+	modis_angle = []
+        f           = lambda fname: gdal.Open(fname).ReadAsArray()
 
-            self.modis_toa   = np.array(modis_toa)*np.array(scale)[:,None, None] + offset[:,None, None]
-            self.modis_angle = np.array(modis_angle)/100.
-            #if sensor=='TERRA'
-            #     self.modis_sensor = 'TERRA'
-            #elif sensor == 'AQUA':
-            #     self.modis_sensor = 'AQUA' 
-            self.modis_sensor =  'TERRA' # Only TERRA used at the moment
-            self.modis_aerosol()
+        self.modis_logger.info('Reading in MODIS TOA.')
+        modis_toa   = parmap(f, band_files)
+
+        self.modis_logger.info('Reading in angles.')
+        modis_angle = parmap(f, angle_files)
+
+	scale  = np.array(modis_file.scale)
+	offset = np.array(modis_file.offset)
+
+	self.modis_toa    = np.array(modis_toa)*np.array(scale)[:,None, None] + offset[:,None, None]
+	self.modis_angle  = np.array(modis_angle)/100.
+	self.modis_sensor = 'TERRA' # Only TERRA used at the moment
+        self.example_file = band_files[0]
+	self.modis_aerosol()
      
     def modis_aerosol(self, save_file=False):
         
         vza, sza, vaa, saa = self.modis_angle
-	self.modis_boa, self.modis_boa_qa = get_brdf_six(self.mcd43_file,angles = [vza, sza, vaa - saa],
-							 bands= (1,2,3,4,5,6,7), flag=None, Linds= None)
+	self.modis_boa, self.modis_boa_qa self.brdf_std = get_brdf_six(self.mcd43_file,angles = [vza, sza, vaa - saa],
+							               bands= (1,2,3,4,5,6,7), flag=None, Linds= None)
 	if self.mod_cloud is None:
 	    self.modis_cloud = np.zeros_like(self.modis_toa[0]).astype(bool)
+ 
+        self.modis_logger.info('Getting elevation.')
+        ele = reproject_data(self.global_dem, self.example_file)
+        ele.get_it()
+        mask = ~np.isfinite(ele.data)
+        ele.data = np.ma.array(ele.data, mask = mask)
+        self.elevation = ele.data[self.Hx, self.Hy]/1000.
+
+        self.modis_logger.info('Getting pripors from ECMWF forcasts.')
+        sen_time_str = json.load(open(self.s2.s2_file_dir+'/tileInfo.json', 'r'))['timestamp']
+        sen_time     = datetime.datetime.strptime(sen_time_str, u'%Y-%m-%dT%H:%M:%S.%fZ')
+        ind          = np.abs((sen_time.hour+sen_time.minute/60.+sen_time.second/3600.)-np.arange(0,25,3)).argmin()
+        hour         = np.arange(0,25,3)[ind]
+        ecmwf_time   = datetime.datetime(sen_time.year, sen_time.month,sen_time.day, hour).strftime("%Y%m%dT%H%M%S")
+        aod_file     = '/aod550_' + ecmwf_time + '_global.tif'
+        tco3_file    = '/tco3_'   + ecmwf_time + '_global.tif'
+
+        aod550         = reproject_data(self.cams_dir + aod_file, self.s2.s2_file_dir+'/B04.jp2')
+        aod550.get_it()
+        aod_scale      = float(aod550.g.GetMetadata()['aod550#scale_factor'])
+        aod_offset     = float(aod550.g.GetMetadata()['aod550#add_offset'])
+        self.s2_aod550 = (aod550.data*aod_scale + aod_offset)[self.Hx, self.Hy] * (1-0.14) # validation of +14% biase
+
+        tco3         = reproject_data(self.cams_dir + tco3_file, self.s2.s2_file_dir+'/B04.jp2')
+        tco3.get_it()
+        tco3_scale   = float(tco3.g.GetMetadata()['gtco3#scale_factor'])
+        tco3_offset  = float(tco3.g.GetMetadata()['gtco3#add_offset'])
+        self.s2_tco3 = (tco3.data*tco3_scale + tco3_offset)\
+                       [self.Hx, self.Hy] * 46.698 * (1 - 0.05) # units and validation of +5% biase
+
+        self.s2_tco3_unc   = np.ones(self.s2_tco3.shape)   * 0.2
+        self.s2_aod550_unc = np.ones(self.s2_aod550.shape) * 0.5
 
 	qua_mask = np.all(self.modis_boa_qa <= self.qa_thresh, axis =0) 
 	boa_mask = np.all(~self.modis_boa.mask, axis = 0) &\
@@ -172,28 +176,6 @@ class solve_aerosol(object):
 	else:
             self.modis_solved.append([i,j, self.atmo.optimization()])
 
-    def repeat_extend(self,data, shape=(10980, 10980)):
-        da_shape    = data.shape
-        re_x, re_y  = int(1.*shape[0]/da_shape[0]), int(1.*shape[1]/da_shape[1])
-        new_data    = np.zeros(shape)
-        new_data[:] = -9999
-        new_data[:re_x*da_shape[0], :re_y*da_shape[1]] = np.repeat(np.repeat(data, re_x,axis=0), re_y, axis=1)
-        return new_data
-        
-    def gaussian(self, xstd, ystd, angle, norm = True):
-        win = 2*int(round(max(1.96*xstd, 1.96*ystd)))
-        winx = int(round(win*(2**0.5)))
-        winy = int(round(win*(2**0.5)))
-        xgaus = signal.gaussian(winx, xstd)
-        ygaus = signal.gaussian(winy, ystd)
-        gaus  = np.outer(xgaus, ygaus)
-        r_gaus = ndimage.interpolation.rotate(gaus, angle, reshape=True)
-        center = np.array(r_gaus.shape)/2
-        cgaus = r_gaus[center[0]-win/2: center[0]+win/2, center[1]-win/2:center[1]+win/2]
-        if norm:
-            return cgaus/cgaus.sum()
-        else:
-            return cgaus 
     
     def _s2_aerosol(self,):
         
@@ -373,9 +355,8 @@ class solve_aerosol(object):
             formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
             ch.setFormatter(formatter)
             self.s2_logger.addHandler(ch)
-        self.s2_logger.propagate = False
-
         self.s2_sensor = 'MSI'
+        self.s2_logger.propagate = False
         self._s2_aerosol()
         self.s2_solved = []
         if self.aero_res < 500:

@@ -3,8 +3,10 @@ import sys
 sys.path.insert(0,'python')
 import gdal
 import numpy as np
+from glob import glob
 import logging
 from Py6S import *
+import cPickle as pkl
 from multi_process import parmap
 from grab_s2_toa import read_s2
 from aerosol_solver import solve_aerosol
@@ -23,47 +25,45 @@ class atmospheric_correction(object):
                  s2_tile,
                  s2_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/s_data/',
                  global_dem  = '/home/ucfafyi/DATA/Multiply/eles/global_dem.vrt',
-                 inverse_emu = '/home/ucfafyi/DATA/Multiply/inverse_emus/'):              
+                 emus_dir    = '/home/ucfafyi/DATA/Multiply/emus/'):              
         
         self.year        = year
         self.month       = month
         self.day         = day
         self.s2_tile     = s2_tile
         self.s2_toa_dir  = s2_toa_dir
-        self.global_dem  =  global_dem
-        self.inverse_emu = inverse_emu
+        self.global_dem  = global_dem
+        self.emus_dir    = emus_dir
         self.sur_refs     = {}
-        # create logger
+
 	self.logger = logging.getLogger('Sentinel 2 Atmospheric Correction')
 	self.logger.setLevel(logging.INFO)
-	# create console handler and set level to debug
         if not self.logger.handlers:       
 	    ch = logging.StreamHandler()
 	    ch.setLevel(logging.DEBUG)
-	    # create formatter
 	    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-	    # add formatter to ch
 	    ch.setFormatter(formatter)
-	    # add ch to logger
 	    self.logger.addHandler(ch)
 
-	    # 'application' code
-	    #logger.debug('debug message')
-	    #logger.info('info message')
-	    #logger.warn('warn message')
-	    #logger.error('error message')
-	    #logger.critical('critical message')
 
     def _load_inverse_emus(self, sensor):
-	AEE = AtmosphericEmulationEngine(sensor, self.inverse_emu)
+	AEE = AtmosphericEmulationEngine(sensor, self.emus_dir)
         return AEE
+
+    def _load_xa_xb_xc_emus(self,):
+        xap_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xap.pkl'%(self.s2_sensor))[0]
+        xbp_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xbp.pkl'%(self.s2_sensor))[0]
+        xcp_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xcp.pkl'%(self.s2_sensor))[0]
+        f = lambda em: pkl.load(open(em, 'rb'))
+        self.xap_emus, self.xbp_emus, self.xcp_emus = parmap(f, [xap_emu, xbp_emu, xcp_emu])
 
     def atmospheric_correction(self,):
 
         self.logger.propagate = False
         self.s2_sensor = 'MSI'
         self.logger.info('Loading emulators.')
-        self.s2_inv_AEE = self._load_inverse_emus(self.s2_sensor)
+        #self.s2_inv_AEE = self._load_inverse_emus(self.s2_sensor)
+        self._load_xa_xb_xc_emus()
         self.s2   = read_s2(self.s2_toa_dir, self.s2_tile, \
                             self.year, self.month, self.day, bands=None)
         self.logger.info('Reading in the reflectance.')
@@ -87,8 +87,9 @@ class atmospheric_correction(object):
         self.logger.info('Getting control variables for 10 meters bands.')
         self._10meter_aod, self._10meter_tcwv, self._10meter_tco3,\
                            self._10meter_ele = self.get_control_variables('B04')
-        self.block_size = 305
-        self.num_blocks = 10980/self.block_size
+        self._block_size = 3660
+        self._num_blocks = 10980/self._block_size
+        self._mean_size  = 60
         self._10meter_band_indexs = [1, 2, 3, 7]        
         self.rsr = [PredefinedWavelengths.S2A_MSI_02, PredefinedWavelengths.S2A_MSI_03, \
                     PredefinedWavelengths.S2A_MSI_04, PredefinedWavelengths.S2A_MSI_08 ]
@@ -97,23 +98,7 @@ class atmospheric_correction(object):
                              self._10meter_saa, self._10meter_vaa, self._10meter_aod,\
                              self._10meter_tcwv, self._10meter_tco3, self._10meter_ele,\
                              self._10meter_band_indexs)     
-        '''  
-        g = gdal.Open(self.s2.s2_file_dir+'/10meter.vrt')
-        xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
-        projection = g.GetProjection()
-	for i,band in enumerate(['B02', 'B03', 'B04', 'B08']):
-	   xres, yres = 10, 10
-	   geotransform = (xmin, xres, 0, ymax, 0, -yres)
-	   nx, ny = 10980, 10980
-	   dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
-				'/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
-	   dst_ds.SetGeoTransform(geotransform)    # specify coords
-	   dst_ds.SetProjection(projection) # export coords to file
-	   dst_ds.GetRasterBand(1).WriteArray(self.boa[i])
-	   dst_ds.FlushCache()                     # write to disk
-	   dst_ds = None
-           self.sur_refs[band] = self.boa[i]
-        '''
+        
 	self.sur_refs.update(dict(zip(['B02', 'B03', 'B04', 'B08'], self.boa)))
         self._save_img(self.boa,['B02', 'B03', 'B04', 'B08'])
 	  
@@ -132,8 +117,9 @@ class atmospheric_correction(object):
         self.logger.info('Getting control variables for 20 meters bands.')
         self._20meter_aod, self._20meter_tcwv, self._20meter_tco3,\
                            self._20meter_ele = self.get_control_variables('B05')
-        self.block_size = 183
-        self.num_blocks = 5490/self.block_size
+        self._block_size = 1830
+        self._num_blocks = 5490/self._block_size
+        self._mean_size  = 30
         self._20meter_band_indexs = [4, 5, 6, 8, 11, 12]
         self.rsr = [PredefinedWavelengths.S2A_MSI_05, PredefinedWavelengths.S2A_MSI_06, \
                     PredefinedWavelengths.S2A_MSI_07, PredefinedWavelengths.S2A_MSI_09, \
@@ -144,22 +130,6 @@ class atmospheric_correction(object):
                              self._20meter_saa, self._20meter_vaa, self._20meter_aod,\
                              self._20meter_tcwv, self._20meter_tco3, self._20meter_ele,\
                              self._20meter_band_indexs)
-        '''
-        g = gdal.Open(self.s2.s2_file_dir+'/20meter.vrt')
-        xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
-        projection = g.GetProjection()
-        for i,band in enumerate(['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']):
-           xres, yres = 20, 20
-           geotransform = (xmin, xres, 0, ymax, 0, -yres)
-           nx, ny = 5490, 5490
-           dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
-                                '/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
-           dst_ds.SetGeoTransform(geotransform)    # specify coords
-           dst_ds.SetProjection(projection) # export coords to file
-           dst_ds.GetRasterBand(1).WriteArray(self.boa[i])
-           dst_ds.FlushCache()                     # write to disk
-           dst_ds = None
-        '''
         self.sur_refs.update(dict(zip(['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'], self.boa)))
         self._save_img(self.boa, ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'])
 
@@ -177,8 +147,9 @@ class atmospheric_correction(object):
         self.logger.info('Getting control variables for 60 meters bands.')
         self._60meter_aod, self._60meter_tcwv, self._60meter_tco3,\
                            self._60meter_ele = self.get_control_variables('B09')
-        self.block_size = 61
-        self.num_blocks = 1830/self.block_size
+        self._block_size = 610
+        self._num_blocks = 1830/self._block_size
+        self._mean_size  = 10
         self._60meter_band_indexs = [0, 9, 10]
         self.rsr = [PredefinedWavelengths.S2A_MSI_01, PredefinedWavelengths.S2A_MSI_10, PredefinedWavelengths.S2A_MSI_11]
 
@@ -187,24 +158,6 @@ class atmospheric_correction(object):
                              self._60meter_saa, self._60meter_vaa, self._60meter_aod,\
                              self._60meter_tcwv, self._60meter_tco3, self._60meter_ele,\
                              self._60meter_band_indexs)
-        '''
-        g = gdal.Open(self.s2.s2_file_dir+'/60meter.vrt')
-        xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
-        projection = g.GetProjection()
-        for i,band in enumerate(['B01', 'B09', 'B10']):
-           xres, yres = 60, 60
-           geotransform = (xmin, xres, 0, ymax, 0, -yres)
-           nx, ny = 1830, 1830
-           dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
-                                '/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
-
-           dst_ds.SetGeoTransform(geotransform)    # specify coords
-           dst_ds.SetProjection(projection) # export coords to file
-           dst_ds.GetRasterBand(1).WriteArray(self.boa[i])
-           dst_ds.FlushCache()                     # write to disk
-           dst_ds = None
-           self.sur_refs[band] = self.boa[i]
-        '''
         self.sur_refs.update(dict(zip(['B01', 'B09', 'B10'], self.boa)))
         self._save_img(self.boa, ['B01', 'B09', 'B10'])
         del all_refs; del self.s2.selected_img; del all_angs; del self.s2.angles
@@ -262,14 +215,15 @@ class atmospheric_correction(object):
         self._tco3        = tco3
         self._elevation   = elevation
         self._band_indexs = band_indexs
-        rows              = np.repeat(np.arange(self.num_blocks), self.num_blocks)
-        columns           = np.tile(np.arange(self.num_blocks), self.num_blocks)
+        rows              = np.repeat(np.arange(self._num_blocks), self._num_blocks)
+        columns           = np.tile(np.arange(self._num_blocks), self._num_blocks)
         blocks            = zip(rows, columns)
-        ret = parmap(self._s2_block_correction_6s, blocks)
+        ret = parmap(self._s2_block_correction_emus_xa_xb_xc, blocks)
+        #ret = parmap(self._s2_block_correction_6s, blocks)
         #ret               = parmap(self._s2_block_correction_emus, blocks) 
-        self.boa = np.array([i[2] for i in ret]).reshape(self.num_blocks, self.num_blocks, toa.shape[0], \
-                             self.block_size, self.block_size).transpose(2,0,3,1,4).reshape(toa.shape[0], \
-                             self.num_blocks*self.block_size, self.num_blocks*self.block_size)
+        self.boa = np.array([i[2] for i in ret]).reshape(self._num_blocks, self._num_blocks, toa.shape[0], \
+                             self._block_size, self._block_size).transpose(2,0,3,1,4).reshape(toa.shape[0], \
+                             self._num_blocks*self._block_size, self._num_blocks*self._block_size)
                         
     def atm(self, p, RSR=None):
 	aod, tcwv, tco3, sza, vza, raa , elevation = p
@@ -291,37 +245,86 @@ class atmospheric_correction(object):
 	s.run()
 	return s.outputs.coef_xap, s.outputs.coef_xbp, s.outputs.coef_xcp
 
-    def _s2_block_correction_6s(self, block):
+    def _s2_block_correction_emus_xa_xb_xc(self, block):
         i, j      = block
         self.logger.info('Block %03d--%03d'%(i,j))
-        slice_x   = slice(i*self.block_size,(i+1)*self.block_size, 1)
-        slice_y   = slice(j*self.block_size,(j+1)*self.block_size, 1)
+        slice_x   = slice(i*self._block_size,(i+1)*self._block_size, 1)
+        slice_y   = slice(j*self._block_size,(j+1)*self._block_size, 1)
 
         toa       = self._toa    [:,slice_x,slice_y]
-        vza       = self._vza    [:,slice_x,slice_y]
-        vaa       = self._vaa    [:,slice_x,slice_y]
-        sza       = self._sza      [slice_x,slice_y]
+        vza       = self._vza    [:,slice_x,slice_y]*np.pi/180.
+        vaa       = self._vaa    [:,slice_x,slice_y]*np.pi/180.
+        sza       = self._sza      [slice_x,slice_y]*np.pi/180.
         saa       = self._saa      [slice_x,slice_y]
         tcwv      = self._tcwv     [slice_x,slice_y]
         tco3      = self._tco3     [slice_x,slice_y]
         aod       = self._aod      [slice_x,slice_y]
         elevation = self._elevation[slice_x,slice_y]/1000.
         corfs = []
-        for bi, rsr in enumerate(self.rsr):
-            p     = np.nanmean(aod), np.nanmean(tcwv), np.nanmean(tco3), np.nanmean(sza), \
-                    np.nanmean(vza[bi]), np.nanmean([saa - vaa[bi]]), np.nanmean(elevation) 
-            a,b,c = self.atm(p, rsr)
+        for bi, band in enumerate(self._band_indexs):    
+            p = [self._block_mean(i, self._mean_size).ravel() for i in [np.cos(sza), \
+                 np.cos(vza[bi]), np.cos(saa - vaa[bi]), aod, tcwv, tco3, elevation]] 
+
+            a = self.xap_emus[band].predict(np.array(p).T)[0].reshape(self._block_size//self._mean_size, \
+                                                                      self._block_size//self._mean_size)
+            b = self.xbp_emus[band].predict(np.array(p).T)[0].reshape(self._block_size//self._mean_size, \
+                                                                      self._block_size//self._mean_size)
+            c = self.xbp_emus[band].predict(np.array(p).T)[0].reshape(self._block_size//self._mean_size, \
+                                                                      self._block_size//self._mean_size)
+            a = np.repeat(np.repeat(a, self._mean_size, axis=0), self._mean_size, axis=1)
+            b = np.repeat(np.repeat(b, self._mean_size, axis=0), self._mean_size, axis=1)
+            c = np.repeat(np.repeat(c, self._mean_size, axis=0), self._mean_size, axis=1)
             y     = a * toa[bi] -b
             corf  = y / (1 + c*y)
             corfs.append(corf)
         boa = np.array(corfs)
         return [i, j, boa]
-        
+
+    def _block_mean(self, data, block_size):
+        x_size, y_size = data.shape
+        x_blocks       = x_size//block_size
+        y_blocks       = y_size//block_size
+        data           = data.copy().reshape(x_blocks, block_size, y_blocks, block_size)        
+        small_data     = np.nanmean(data, axis=(3,1))
+        return small_data
+
+
+    def _s2_block_correction_emus_xa_xb_xc_(self, block):
+        i, j      = block
+        self.logger.info('Block %03d--%03d'%(i,j))
+        slice_x   = slice(i*self._block_size,(i+1)*self._block_size, 1)
+        slice_y   = slice(j*self._block_size,(j+1)*self._block_size, 1)
+
+        toa       = self._toa    [:,slice_x,slice_y]
+        vza       = self._vza    [:,slice_x,slice_y]*np.pi/180.
+        vaa       = self._vaa    [:,slice_x,slice_y]*np.pi/180.
+        sza       = self._sza      [slice_x,slice_y]*np.pi/180.
+        saa       = self._saa      [slice_x,slice_y]
+        tcwv      = self._tcwv     [slice_x,slice_y]
+        tco3      = self._tco3     [slice_x,slice_y]
+        aod       = self._aod      [slice_x,slice_y]
+        elevation = self._elevation[slice_x,slice_y]/1000.
+        corfs = []
+        for bi, band in enumerate(self._band_indexs):
+            p = [np.cos(np.nanmean(sza.reshape())), np.cos(np.nanmean(vza[bi])), np.cos(np.nanmean([saa - \
+                 vaa[bi]])), np.nanmean(aod), np.nanmean(tcwv), np.nanmean(tco3), np.nanmean(elevation)] 
+            #p = [np.cos(sza).ravel(), np.cos(vza[bi]).ravel(), \
+            #     np.cos(saa - vaa[bi]).ravel(), aod.ravel(), \
+            #     tcwv.ravel(), tco3.ravel(), elevation.ravel()]
+            a = self.xap_emus[band].predict(np.array([p,]))[0]
+            b = self.xbp_emus[band].predict(np.array([p,]))[0]
+            c = self.xbp_emus[band].predict(np.array([p,]))[0]
+            y     = a * toa[bi] -b
+            corf  = y / (1 + c*y)
+            corfs.append(corf)
+        boa = np.array(corfs)
+        return [i, j, boa]
+
     def _s2_block_correction_emus(self, block):
         i, j      = block
         self.logger.info('Block %03d--%03d'%(i,j))
-        slice_x   = slice(i*self.block_size,(i+1)*self.block_size, 1)
-        slice_y   = slice(j*self.block_size,(j+1)*self.block_size, 1)
+        slice_x   = slice(i*self._block_size,(i+1)*self._block_size, 1)
+        slice_y   = slice(j*self._block_size,(j+1)*self._block_size, 1)
 
         toa       =      self._toa[:,slice_x,slice_y].reshape(self._toa.shape[0], -1)
         vza       = list(self._vza[:,slice_x,slice_y].reshape(self._vza.shape[0], -1)*np.pi/180.)

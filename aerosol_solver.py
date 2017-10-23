@@ -75,7 +75,7 @@ class solve_aerosol(object):
         self.s2_full_res = (10980, 10980)
         self.m_subsample = 10
         self.s_subsample = 1
-        self.aero_res    = 3000
+        self.aero_res    = 3050
         mcd43_tmp        = '%s/MCD43A1.A%d%03d.h%02dv%02d.006.*.hdf'
         self.mcd43_file  = glob(mcd43_tmp%(self.mcd43_dir,\
                                  self.year, self.doy, self.h, self.v))[0]
@@ -288,7 +288,7 @@ class solve_aerosol(object):
             tcwv.get_it()
             tcwv_scale    = float(tcwv.g.GetMetadata()['tcwv#scale_factor'])
             tcwv_offset   = float(tcwv.g.GetMetadata()['tcwv#add_offset'])
-            self.s2_tcwv  = (tcwv.data*tcwv_scale + tcwv_offset)[self.Hx, self.Hy]
+            self.s2_tcwv  = (tcwv.data*tcwv_scale + tcwv_offset)[self.Hx, self.Hy]/10.
             self.s2_tcwv_unc = np.ones(self.s2_tcwv.shape) * 0.2
 
         self.s2_logger.info('Applying PSF model.')
@@ -383,7 +383,7 @@ class solve_aerosol(object):
                                      than 500 meters (inlcude), so it is set to 500 meters.')
             self.aero_res = 500
         self.block_size = int(self.aero_res/10)
-        num_blocks = int(10980/self.block_size) + 1
+        num_blocks = int(np.ceil(10980/self.block_size)) 
         self.s2_logger.info('Start solving...')
         for i in range(num_blocks):
             for j in range(num_blocks):
@@ -432,7 +432,7 @@ class solve_aerosol(object):
                                             (self.Hx < (i+1)*self.block_size),
                                             (self.Hy >= j*self.block_size),
                                             (self.Hy < (j+1)*self.block_size)))
-        mask = self.s2_mask[block_mask]
+        mask      = self.s2_mask[block_mask]
 	prior     = self.s2_aod550[block_mask].mean(), \
 		    self.s2_tcwv[block_mask].mean(), self.s2_tco3[block_mask].mean()
         if mask.sum() <= 0:
@@ -446,8 +446,8 @@ class solve_aerosol(object):
 	    elevation = self.elevation[block_mask]
             brdf_std  = self.brdf_stds[:,block_mask]   
 	    self.atmo = solving_atmo_paras(self.s2_sensor, self.emus_dir, boa, toa, sza, vza, saa, vaa,\
-				           elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130],\
-                                           band_indexs=[1, 2, 3, 7, 11, 12], mask=mask, prior=prior, subsample=1, brdf_std=brdf_std)
+				           elevation, boa_qa, boa_bands=[469, 555, 645, 869, 1640, 2130], mask=mask,\
+                                           band_indexs=[1, 2, 3, 7, 11, 12], prior=prior, subsample=1, brdf_std=brdf_std)
 
 	    self.atmo._load_unc()
 	    self.atmo.aod_unc   = self.s2_aod550_unc[block_mask].max()

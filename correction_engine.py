@@ -270,7 +270,7 @@ class atmospheric_correction(object):
         vza       = self._vza    [:,slice_x,slice_y]*np.pi/180.
         vaa       = self._vaa    [:,slice_x,slice_y]*np.pi/180.
         sza       = self._sza      [slice_x,slice_y]*np.pi/180.
-        saa       = self._saa      [slice_x,slice_y]
+        saa       = self._saa      [slice_x,slice_y]*np.pi/180.
         tcwv      = self._tcwv     [slice_x,slice_y]
         tco3      = self._tco3     [slice_x,slice_y]
         aod       = self._aod      [slice_x,slice_y]
@@ -314,7 +314,7 @@ class atmospheric_correction(object):
         vza       = self._vza    [:,slice_x,slice_y]*np.pi/180.
         vaa       = self._vaa    [:,slice_x,slice_y]*np.pi/180.
         sza       = self._sza      [slice_x,slice_y]*np.pi/180.
-        saa       = self._saa      [slice_x,slice_y]
+        saa       = self._saa      [slice_x,slice_y]*np.pi/180.
         tcwv      = self._tcwv     [slice_x,slice_y]
         tco3      = self._tco3     [slice_x,slice_y]
         aod       = self._aod      [slice_x,slice_y]

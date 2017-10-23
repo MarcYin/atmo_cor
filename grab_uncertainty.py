@@ -32,7 +32,7 @@ class grab_uncertainty(object):
         if self.boa_band is None:
             raise IOError('boa_band should be specified.')
         assert self.modis_boa.shape == self.boa_qa.shape, "shapes do not match."
-	assert len(self.boa_band)  == self.modis_boa.shape[0], "boa_band should match modis_boa."
+	assert len(self.boa_band)   == self.modis_boa.shape[0], "boa_band should match modis_boa."
         generalised_unc = 0.05*self.modis_boa +0.005	
         band_unc = np.zeros_like(self.modis_boa)		
         for i, band in enumerate(self.boa_band):

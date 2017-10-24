@@ -74,69 +74,87 @@ class solving_atmo_paras(object):
         if self.mask.ndim == 2:
             flat_mask = self.mask[self.subsample_sta::self.subsample, \
                                   self.subsample_sta::self.subsample].flatten()
-        elif self.mask.dmin == 1:
+        elif self.mask.ndim == 1:
             flat_mask = self.mask[self.subsample_sta::self.subsample]  
         else:
             raise IOError('Wrong shape mask is given.')
     
         if  self.boa.ndim == 3:  
             flat_boa = self.boa[:,self.subsample_sta::self.subsample, \
-                                  self.subsample_sta::self.subsample].reshape(self.boa.shape[0], -1)[...,flat_mask]
-        elif self.boa.dmin == 2:
-             flat_boa = self.boa[:,self.subsample_sta::self.subsample][...,flat_mask]
+                                  self.subsample_sta::self.subsample].reshape(self.boa.shape[0], -1)[..., flat_mask]
+        elif self.boa.ndim == 2:
+             flat_boa = self.boa[:,self.subsample_sta::self.subsample][..., flat_mask]
         else:
             raise IOError('Wrong shape BOA is given.')
 
         if self.toa.ndim == 3:
             flat_toa     = self.toa[:,self.subsample_sta::self.subsample, \
-                                      self.subsample_sta::self.subsample].reshape(self.toa.shape[0], -1)[...,flat_mask]
+                                      self.subsample_sta::self.subsample].reshape(self.toa.shape[0], -1)[..., flat_mask]
         elif self.toa.ndim == 2:
-            flat_toa = self.toa[:,self.subsample_sta::self.subsample][...,flat_mask]
+            flat_toa = self.toa[:,self.subsample_sta::self.subsample][..., flat_mask]
         else:
             raise IOError('Wrong shape TOA is given.')
         if self.boa_unc.ndim == 3:
             flat_boa_unc = self.boa_unc[:,self.subsample_sta::self.subsample, \
-                                          self.subsample_sta::self.subsample].reshape(self.toa.shape[0], -1)[...,flat_mask]
+                                          self.subsample_sta::self.subsample].reshape(self.toa.shape[0], -1)[..., flat_mask]
         elif self.boa_unc.ndim == 2:
-             flat_boa_unc = self.boa_unc[:,self.subsample_sta::self.subsample][...,flat_mask]
+             flat_boa_unc = self.boa_unc[:,self.subsample_sta::self.subsample][..., flat_mask]
         else:
             raise IOError('Wrong shape BOA uncertainty is given.')
 
         if self.atmosphere is not None:
             if self.atmosphere.ndim == 3:
                 flat_atmos = self.atmosphere[:, self.subsample_sta::self.subsample, \
-                                                self.subsample_sta::self.subsample].reshape(3, -1)[...,flat_mask]
+                                                self.subsample_sta::self.subsample].reshape(3, -1)[..., flat_mask]
             elif self.atmosphere.ndim == 2:
-                flat_atmos = self.atmosphere[:, self.subsample_sta::self.subsample][...,flat_mask]
+                flat_atmos = self.atmosphere[:, self.subsample_sta::self.subsample][..., flat_mask]
 
             self.flat_atmos = flat_atmos
         else:
             flat_atmos = np.array([])
             self.flat_atmos = flat_atmos   
         flat_angs_ele = []
-        for i in [self.sza, self.vza, self.saa, self.vaa, self.elevation]:
+        for i in [self.sza, self.vza, self.saa, self.vaa]:
             if isinstance(i, (float,int)):
                 flat_angs_ele.append(i)
-            else:
-                if i.ndim == self.boa.ndim:
-                    assert i.shape[0] == self.boa.shape[0], 'check the shape of i.'
-                    flat_i = i[:,self.subsample_sta::self.subsample, \
-                                 self.subsample_sta::self.subsample].reshape(i.shape[0], -1)[...,flat_mask]
-                elif i.shape == self.boa.shape[1:]:
-                    flat_i = i[self.subsample_sta::self.subsample, \
-                               self.subsample_sta::self.subsample].flatten()[flat_mask]
-                elif i.shape[0] == self.boa.shape[0]:
-                    flat_i = i[:, self.subsample_sta::self.subsample][...,flat_mask]
-                else:
-                    raise IOError('Wrong shape i is given.')
-                flat_angs_ele.append([np.array(item) for item in np.ones(flat_boa.shape)*flat_i]) # make sure the type dose not change...
+	    elif i.ndim ==3:
+		assert i.shape[0] == self.boa.shape[0], 'check the shape of angles.'
+		flat_i = i[:,self.subsample_sta::self.subsample, \
+			     self.subsample_sta::self.subsample].reshape(i.shape[0], -1)[..., flat_mask]
+	    elif (i.ndim == 2) & (i.shape == self.boa.shape[1:]):
+		flat_i = i[self.subsample_sta::self.subsample, \
+			   self.subsample_sta::self.subsample].flatten()[flat_mask]
+	    elif (i.ndim == 2) & (i.shape != self.boa.shape[1:]):
+		assert i.shape[0] == self.boa.shape[0], 'check the shape of angles.'
+		flat_i = i[:, self.subsample_sta::self.subsample][..., flat_mask]
+	    elif (i.ndim == 1) & (i.shape[0] == self.boa.shape[0]):
+		flat_i = i
+	    else:
+		raise IOError('Wrong shape angles is given.')
+	    flat_angs_ele.append([np.array(ang) for ang in \
+				  np.ones(flat_boa.shape)*flat_i]) # make sure the type dose not change...
+
+        if isinstance(self.elevation, (float, int)):
+            flat_angs_ele.append(self.elevation)
+          
+        elif self.elevation.ndim == 2:
+            flat_ele  = self.elevation[self.subsample_sta::self.subsample, \
+                                       self.subsample_sta::self.subsample].flatten()[flat_mask]
+            flat_angs_ele.append(flat_ele)
+        elif self.elevation.ndim == 1:
+            flat_ele = self.elevation[self.subsample_sta::self.subsample][flat_mask]
+            flat_angs_ele.append(flat_ele)
+       
         ## for the prior
         if np.array(self.prior).ndim == 1:
             self.flat_prior = np.array(self.prior) 
-        else:
+        elif np.array(self.prior).ndim == 2:
+            assert self.prior.shape[1] == self.boa.shape[1], 'prior should have the same shape as the second axis of boa.'
+            self.flat_prior = np.array(self.prior)[:, self.subsample_sta::self.subsample][..., flat_mask]
+        elif np.array(self.prior).ndim == 3:
             assert self.prior.shape == self.boa.shape[1:], 'prior should have the same shape as the last two axises of boa.'
-            self.flat_prior = self.prior[:,self.subsample_sta::self.subsample, \
-                                           self.subsample_sta::self.subsample].reshape(3,-1)[...,flat_mask]
+            self.flat_prior = self.prior[:, self.subsample_sta::self.subsample, \
+                                            self.subsample_sta::self.subsample].reshape(3,-1)[..., flat_mask]
 
         return flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, flat_angs_ele# [sza, vza, saa, vaa, elevation]        
 

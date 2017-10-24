@@ -14,11 +14,9 @@ from smoothn import smoothn
 from grab_s2_toa import read_s2
 from multi_process import parmap
 from reproject import reproject_data
-from get_modis_toa import grab_modis_toa
 from get_brdf import get_brdf_six
 from atmo_paras_optimization import solving_atmo_paras
 from spatial_mapping import Find_corresponding_pixels, cloud_dilation
-from modis_l1b_reader import MODIS_L1b_reader
 from emulation_engine import AtmosphericEmulationEngine
 from psf_optimize import psf_optimize
 
@@ -31,22 +29,18 @@ class solve_aerosol(object):
                  year, doy,
                  emus_dir    = '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',
                  mcd43_dir   = '/data/selene/ucfajlg/Ujia/MCD43/',
-                 mod_l1b_dir = '/data/selene/ucfajlg/Ujia/MODIS_L1b/GRIDDED',
                  s2_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/s_data/',
                  l8_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/l_data/',
                  global_dem  = '/home/ucfafyi/DATA/Multiply/eles/global_dem.vrt',
                  wv_emus_dir = '/home/ucfafyi/DATA/Multiply/Atmo_cor/data/wv_msi_retrieval_NEW.pkl',
                  cams_dir    = '/home/ucfafyi/DATA/Multiply/cams/',
-                 inverse_emu = '/home/ucfafyi/DATA/Multiply/inverse_emus/',
                  s2_tile     = '29SQB',
                  l8_tile     = (204,33),
                  s2_psf      = [29.75, 39 , 0, 38, 40],
                  l8_psf      = None,
                  qa_thresh   = 255,
-                 mod_cloud   = None,
                  verbose     = True,
-                 save_file   = False,
-                 aero_res    = None, # resolution for aerosol retrival in meters should be larger than 500
+                 aero_res    = 3050, # resolution for aerosol retrival in meters should be larger than 500
                  reconstruct_s2_angle = True):
 
         self.year        = year 
@@ -58,22 +52,18 @@ class solve_aerosol(object):
         self.h           = h
         self.v           = v
         self.mcd43_dir   = mcd43_dir
-        self.mod_l1b_dir = mod_l1b_dir
         self.emus_dir    = emus_dir
         self.qa_thresh   = qa_thresh
-        self.mod_cloud   = mod_cloud 
         self.s2_toa_dir  = s2_toa_dir
         self.l8_toa_dir  = l8_toa_dir
         self.global_dem  = global_dem
         self.wv_emus_dir = wv_emus_dir
         self.cams_dir    = cams_dir
-        self.inverse_emu = inverse_emu
         self.s2_tile     = s2_tile
         self.l8_tile     = l8_tile
         self.s2_psf      = s2_psf 
         self.s2_u_bands  = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A', 'B09' #bands used for the atmo-cor
         self.s2_full_res = (10980, 10980)
-        self.m_subsample = 10
         self.s_subsample = 1
         self.aero_res    = 3050
         mcd43_tmp        = '%s/MCD43A1.A%d%03d.h%02dv%02d.006.*.hdf'
@@ -84,93 +74,12 @@ class solve_aerosol(object):
         self.s2_spectral_transform = [[ 1.06946607,  1.03048916,  1.04039226,  1.00163932,  1.00010918, 0.95607606,  0.99951677],
                                       [ 0.0035921 , -0.00142761, -0.00383504, -0.00558762, -0.00570695, 0.00861192,  0.00188871]]       
        
-        self.prior        =  0.2, 3.4, 0.35
     def _load_emus(self, sensor):
         AEE = AtmosphericEmulationEngine(sensor, self.emus_dir)
         up_bounds   = AEE.emulators[0].inputs[:,4:7].max(axis=0)
         low_bounds  = AEE.emulators[0].inputs[:,4:7].min(axis=0)
         bounds = np.array([low_bounds, up_bounds]).T
         return AEE, bounds
-
-    def prepare_modis(self,):
-        
-        modis_l1b       = MODIS_L1b_reader(self.mod_l1b_dir, "h%02dv%02d"%(self.h,self.v),self.year)
-        self.modis_files = [modis_l1b.granules[i] for i in modis_l1b.granules.keys() if i.date() == self.date.date()]
-        #self.modis_toa, self.modis_angles = grab_modis_toa(year=2006,doy=200,verbose=True,\
-        #                                                   mcd43file = self.mcd43_file, directory_l1b= self.mod_l1b_dir)
-        for modis_file in self.modis_files[1:2]:
-            band_files  = [getattr(modis_file, 'b%d'%band) for band in range(1,8)]
-            angle_files = [getattr(modis_file, ang) for ang in ['vza', 'sza', 'vaa', 'saa']]
-            modis_toa   = []
-            modis_angle = []
-            for band_file in band_files:
-                g = gdal.Open(band_file)
-                if g is None:
-                    raise IOError
-                else:
-                    data = g.ReadAsArray()
-                modis_toa.append(data)
-            for angle_file in angle_files:
-                g = gdal.Open(angle_file)
-                if g is None:
-                    raise IOError
-                else:
-                    data = g.ReadAsArray()
-                modis_angle.append(data)
-
-            scale  = np.array(modis_file.scale)
-            offset = np.array(modis_file.offset)
-
-            self.modis_toa   = np.array(modis_toa)*np.array(scale)[:,None, None] + offset[:,None, None]
-            self.modis_angle = np.array(modis_angle)/100.
-            #if sensor=='TERRA'
-            #     self.modis_sensor = 'TERRA'
-            #elif sensor == 'AQUA':
-            #     self.modis_sensor = 'AQUA' 
-            self.modis_sensor =  'TERRA' # Only TERRA used at the moment
-            self.modis_aerosol()
-     
-    def modis_aerosol(self, save_file=False):
-        
-        vza, sza, vaa, saa = self.modis_angle
-	self.modis_boa, self.modis_boa_qa = get_brdf_six(self.mcd43_file,angles = [vza, sza, vaa - saa],
-							 bands= (1,2,3,4,5,6,7), flag=None, Linds= None)
-	if self.mod_cloud is None:
-	    self.modis_cloud = np.zeros_like(self.modis_toa[0]).astype(bool)
-
-	qua_mask = np.all(self.modis_boa_qa <= self.qa_thresh, axis =0) 
-	boa_mask = np.all(~self.modis_boa.mask, axis = 0) &\
-	                  np.all(self.modis_boa>0, axis=0) &\
-			  np.all(self.modis_boa<1, axis=0)
-	toa_mask = np.all(np.isfinite(self.modis_toa), axis=0) &\
-                          np.all(self.modis_toa>0, axis=0) & \
-                          np.all(self.modis_toa<1, axis=0)
-	self.modis_mask = qua_mask & boa_mask & toa_mask & (~self.modis_cloud)
-       
-        self.modis_AEE, self.modis_bounds = self._load_emus(self.modis_sensor)
-        self.modis_solved = []
-        
-    def _m_block_solver(self,block):
-	i,j = block
-	block_mask= np.zeros_like(self.modis_mask).astype(bool)
-	block_mask[i*self.block_size:(i+1)*self.block_size,j*self.block_size:(j+1)*self.block_size] = True        
-	boa, toa  = self.modis_boa[:, block_mask].reshape(7,self.block_size, self.block_size),\
-                    self.modis_toa[:, block_mask].reshape(7,self.block_size, self.block_size)
-	vza, sza  = (self.modis_angle[:2, block_mask]*np.pi/180.).reshape(2,self.block_size, self.block_size)
-	vaa, saa  = self.modis_angle[2:, block_mask].reshape(2,self.block_size, self.block_size)
-	boa_qa    = self.modis_boa_qa[:, block_mask].reshape(7,self.block_size,self.block_size)
-	mask      = self.modis_mask[block_mask].reshape(self.block_size, self.block_size)
-	prior     = 0.2, 3.4, 0.35
-	self.atmo = atmo_cor(self.modis_sensor, self.emus_dir, boa, toa, sza, vza, 
-                             saa, vaa,0.5, boa_qa, boa_bands=[645,869,469,555,1240,1640,2130], 
-                             band_indexs=[0,1,2,3,4,5,6], mask=mask, prior=prior, subsample=self.m_subsample)
-	self.atmo._load_unc()
-	self.atmo.AEE    = self.modis_AEE
-	self.atmo.bounds = self.modis_bounds
-	if mask.sum() <= 0:
-	    print 'No valid values in block %03d-%03d'%(i,j)
-	else:
-            self.modis_solved.append([i,j, self.atmo.optimization()])
 
     def repeat_extend(self,data, shape=(10980, 10980)):
         da_shape    = data.shape
@@ -260,14 +169,18 @@ class solve_aerosol(object):
         aod_scale      = float(aod550.g.GetMetadata()['aod550#scale_factor'])
         aod_offset     = float(aod550.g.GetMetadata()['aod550#add_offset'])
         self.s2_aod550 = (aod550.data*aod_scale + aod_offset)[self.Hx, self.Hy] * (1-0.14) # validation of +14% biase
-
-	tco3         = reproject_data(self.cams_dir + tco3_file, self.s2.s2_file_dir+'/B04.jp2')
+        mask           = (self.s2_aod550 <= 0.00045)
+        if mask.sum() >= 1:
+            self.s2_aod550[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.s2_aod550[~mask])
+	tco3           = reproject_data(self.cams_dir + tco3_file, self.s2.s2_file_dir+'/B04.jp2')
         tco3.get_it()
-        tco3_scale   = float(tco3.g.GetMetadata()['gtco3#scale_factor'])
-        tco3_offset  = float(tco3.g.GetMetadata()['gtco3#add_offset'])
-        self.s2_tco3 = (tco3.data*tco3_scale + tco3_offset)\
-                       [self.Hx, self.Hy] * 46.698 * (1 - 0.05) # units and validation of +5% biase
-
+        tco3_scale     = float(tco3.g.GetMetadata()['gtco3#scale_factor'])
+        tco3_offset    = float(tco3.g.GetMetadata()['gtco3#add_offset'])
+        self.s2_tco3   = (tco3.data*tco3_scale + tco3_offset)\
+                          [self.Hx, self.Hy] * 46.698 * (1 - 0.05) # units and validation of +5% biase
+        mask           = (self.s2_tco3 <= 0.152)   
+        if mask.sum() >= 1:
+            self.s2_tco3[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.s2_tco3[~mask])
         self.s2_tco3_unc   = np.ones(self.s2_tco3.shape)   * 0.2
         self.s2_aod550_unc = np.ones(self.s2_aod550.shape) * 0.5
 
@@ -279,16 +192,21 @@ class solve_aerosol(object):
 	    inputs    = np.array([b9, b8a, vza[-1], sza[-1], abs(raa)[-1], self.elevation]).T
             tcwv_mask = b8a < 0.05 
 	    self.s2_tcwv, self.s2_tcwv_unc, _ = wv_emus.predict(inputs, do_unc = True)
-            self.s2_tcwv[tcwv_mask] = np.interp(np.flatnonzero( tcwv_mask), \
-                                                np.flatnonzero(~tcwv_mask), self.s2_tcwv[~tcwv_mask]) # simple interpolation
+            if tcwv_mask.sum() >= 1:
+                self.s2_tcwv[tcwv_mask] = np.interp(np.flatnonzero( tcwv_mask), \
+                                                    np.flatnonzero(~tcwv_mask), self.s2_tcwv[~tcwv_mask]) # simple interpolation
 	except:
             self.s2_logger.warning('Getting tcwv from the emulation of sen2cor look up table failed, ECMWF data used.')
-            tcwv_file     = '/tcwv_' + ecmwf_time + '_global.tif'
-            tcwv          = reproject_data(self.cams_dir + tcwv_file, self.s2.s2_file_dir+'/B04.jp2')
+            tcwv_file      = '/tcwv_' + ecmwf_time + '_global.tif'
+            tcwv           = reproject_data(self.cams_dir + tcwv_file, self.s2.s2_file_dir+'/B04.jp2')
             tcwv.get_it()
-            tcwv_scale    = float(tcwv.g.GetMetadata()['tcwv#scale_factor'])
-            tcwv_offset   = float(tcwv.g.GetMetadata()['tcwv#add_offset'])
-            self.s2_tcwv  = (tcwv.data*tcwv_scale + tcwv_offset)[self.Hx, self.Hy]/10.
+            tcwv_scale     = float(tcwv.g.GetMetadata()['tcwv#scale_factor'])
+            tcwv_offset    = float(tcwv.g.GetMetadata()['tcwv#add_offset'])
+            self.s2_tcwv   = (tcwv.data*tcwv_scale + tcwv_offset)[self.Hx, self.Hy]/10.
+            mask           = (self.s2_tcwv <= 0.0054)
+            if mask.sum() >= 1:
+               self.s2_tcwv[mask] = np.interp(np.flatnonzero( mask), \
+                                              np.flatnonzero(~mask), self.s2_tcwv[~mask])
             self.s2_tcwv_unc = np.ones(self.s2_tcwv.shape) * 0.2
 
         self.s2_logger.info('Applying PSF model.')
@@ -301,7 +219,9 @@ class solve_aerosol(object):
             psf         = psf_optimize(high_img, high_indexs, low_img, qa, cloud, 2)
             xs, ys      = psf.fire_shift_optimize()
             xstd, ystd  = 29.75, 39
-            print 'Solved PSF parameters are: ',xstd, ystd, 0, xs, ys, 'and the correlation is: ', 1-self.costs
+            ang         = 0
+            self.s2_logger.info('Solved PSF parameters are: %.02f, %.02f, %d, %d, %d, and the correlation is: %f.' \
+                                 %(xstd, ystd, 0, xs, ys, 1-psf.costs.min()))
         else:
             xstd, ystd, ang, xs, ys = self.s2_psf
         # apply psf shifts without going out of the image extend  
@@ -385,11 +305,12 @@ class solve_aerosol(object):
         self.block_size = int(self.aero_res/10)
         num_blocks = int(np.ceil(10980/self.block_size)) 
         self.s2_logger.info('Start solving...')
-        for i in range(num_blocks):
-            for j in range(num_blocks):
-                self.s2_logger.info('Doing block %03d-%03d.'%(i,j))
-                self._s2_block_solver([i,j])
-           
+        #for i in range(num_blocks):
+        #    for j in range(num_blocks):
+        #        self.s2_logger.info('Doing block %03d-%03d.'%(i+1,j+1))
+        #        self._s2_block_solver([i,j])
+        blocks = zip(np.repeat(range(num_blocks), num_blocks), np.tile(range(num_blocks), num_blocks)) 
+        self.s2_solved = parmap(aero._s2_block_solver, blocks)   
         inds = np.array([[i[0], i[1]] for i in self.s2_solved])
         rets = np.array([i[2][0]      for i in self.s2_solved])
           
@@ -410,8 +331,8 @@ class solve_aerosol(object):
         results = []
         self.s2_logger.info('Finished retrieval and saving them into local files.')
         for i,para_map in enumerate([aod_map, tcwv_map, tco3_map]):
-            s     = smoothn(para_map, isrobust=True, verbose=False)[1]
-            smed  = smoothn(para_map, isrobust=True, verbose=False, s=s)[0]
+            s     = smoothn(para_map.copy(), isrobust=True, verbose=False)[1]
+            smed  = smoothn(para_map.copy(), isrobust=True, verbose=False, s=s)[0]
             xres, yres = self.block_size*10, self.block_size*10
             geotransform = (xmin, xres, 0, ymax, 0, -yres)
             nx, ny = smed.shape
@@ -428,6 +349,7 @@ class solve_aerosol(object):
         # solve by block
     def _s2_block_solver(self, block):
         i,j = block
+        self.s2_logger.info('Doing block %03d-%03d.'%(i+1,j+1))
         block_mask = np.logical_and.reduce(((self.Hx >= i*self.block_size),
                                             (self.Hx < (i+1)*self.block_size),
                                             (self.Hy >= j*self.block_size),
@@ -436,8 +358,8 @@ class solve_aerosol(object):
 	prior     = self.s2_aod550[block_mask].mean(), \
 		    self.s2_tcwv[block_mask].mean(), self.s2_tco3[block_mask].mean()
         if mask.sum() <= 0:
-            self.s2_logger.warning('No valid values in block %03d-%03d, and priors are used for this block.'%(i,j))
-            self.s2_solved.append([i,j,[prior, 0], prior])
+            self.s2_logger.warning('No valid values in block %03d-%03d, and priors are used for this block.'%(i+1,j+1))
+            return [i,j,[prior, 0], prior]
         else:
 	    boa, toa  = self.s2_boa[:, block_mask], self.s2_toa[:, block_mask]
 	    vza, sza  = self.s2_angles[:2,:, block_mask]*np.pi/180. 
@@ -455,11 +377,11 @@ class solve_aerosol(object):
 	    self.atmo.ozone_unc = self.s2_tco3_unc[block_mask].max()
 	    self.atmo.AEE       = self.s2_AEE
 	    self.atmo.bounds    = self.s2_bounds
-            self.s2_solved.append([i,j, self.atmo.optimization(), prior])
+            return ([i,j, self.atmo.optimization(), prior])
         
 
 if __name__ == "__main__":
     aero = solve_aerosol(17, 5, 2017, 247,mcd43_dir = '/home/ucfafyi/DATA/Multiply/MCD43/', \
-                                   emus_dir = '/home/ucfafyi/DATA/Multiply/', s2_tile='29SQB')
+                                   emus_dir = '/home/ucfafyi/DATA/Multiply/', s2_tile='29SQB', s2_psf=None)
     aero.solving_s2_aerosol()
     #solved  = aero.prepare_modis()

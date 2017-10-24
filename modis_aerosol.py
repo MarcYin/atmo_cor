@@ -61,7 +61,7 @@ class solve_aerosol(object):
         bounds = np.array([low_bounds, up_bounds]).T
         return AEE, bounds
 
-    def prepare_modis(self,):
+    def getting_atmo_paras(self,):
         self.modis_logger = logging.getLogger('MODIS Atmospheric Correction')
         self.modis_logger.setLevel(logging.INFO)
         if not self.modis_logger.handlers:
@@ -132,19 +132,27 @@ class solve_aerosol(object):
         aod550.get_it()
         aod_scale         = float(aod550.g.GetMetadata()['aod550#scale_factor'])
         aod_offset        = float(aod550.g.GetMetadata()['aod550#add_offset'])
-        self.aod550 = (aod550.data*aod_scale + aod_offset) * (1-0.14) # validation of +14% biase
+        self.aod550       = (aod550.data*aod_scale + aod_offset) * (1-0.14) # validation of +14% biase
+        mask              = (self.aod550 <= 0.00045) 
+        if mask.sum()    >= 1:
+            self.aod550[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.aod550[~mask])
 
         tco3              = reproject_data(self.cams_dir + tco3_file, self.example_file)
         tco3.get_it()
         tco3_scale        = float(tco3.g.GetMetadata()['gtco3#scale_factor'])
         tco3_offset       = float(tco3.g.GetMetadata()['gtco3#add_offset'])
-        self.tco3   = (tco3.data*tco3_scale + tco3_offset) * 46.698 * (1 - 0.05) # units and validation of +5% biase
+        self.tco3         = (tco3.data*tco3_scale + tco3_offset) * 46.698 * (1 - 0.05) # units and validation of +5% biase
+        mask              = (self.tco3 <= 0.152) 
+        if mask.sum()    >= 1:
+            self.tco3[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.tco3[~mask])
         tcwv              = reproject_data(self.cams_dir + tcwv_file, self.example_file)
 	tcwv.get_it()
 	tcwv_scale        = float(tcwv.g.GetMetadata()['tcwv#scale_factor'])
 	tcwv_offset       = float(tcwv.g.GetMetadata()['tcwv#add_offset'])
-	self.tcwv   = (tcwv.data*tcwv_scale + tcwv_offset)/10.
-
+	self.tcwv         = (tcwv.data*tcwv_scale + tcwv_offset)/10.
+        mask              = (self.tcwv <= 0.0054)     
+        if mask.sum()>=1:
+            self.tcwv[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.tcwv[~mask])
         self.tco3_unc   = np.ones(self.tco3.shape)   * 0.2
         self.aod550_unc = np.ones(self.aod550.shape) * 0.5
         self.tcwv_unc   = np.ones(self.tcwv.shape)   * 0.2
@@ -180,13 +188,15 @@ class solve_aerosol(object):
             self.modis_logger.warning( 'The best resolution of aerosol should be larger \
                                      than 500 meters (inlcude), so it is set to 500 meters.')
             self.aero_res = 500
-        self.block_size = int(self.aero_res/500)
-        num_blocks = int(np.ceil(2400/self.block_size))
+        self.block_size   = int(self.aero_res/500)
+        num_blocks        = int(np.ceil(2400/self.block_size))
         self.modis_logger.info('Start solving......')
-        for i in range(num_blocks):
-            for j in range(num_blocks):
-                self.modis_logger.info('Doing block %03d-%03d.'%(i+1,j+1))
-                self._m_block_solver([i,j])
+        blocks            = zip(np.repeat(range(num_blocks), num_blocks), np.tile(range(num_blocks), num_blocks))
+        self.modis_solved = parmap(self._m_block_solver, blocks)
+        #for i in range(num_blocks):
+        #    for j in range(num_blocks):
+        #        self.modis_logger.info('Doing block %03d-%03d.'%(i+1,j+1))
+        #        self._m_block_solver([i,j])
 
         inds = np.array([[i[0], i[1]] for i in self.modis_solved])
         rets = np.array([i[2][0]      for i in self.modis_solved])
@@ -208,13 +218,15 @@ class solve_aerosol(object):
         results = []
         self.modis_logger.info('Finished retrieval and saving them into local files.')
         for i,para_map in enumerate([aod_map, tcwv_map, tco3_map]):
-            s     = smoothn(para_map, isrobust=True, verbose=False)[1]
-            smed  = smoothn(para_map, isrobust=True, verbose=False, s=s)[0]
+            s     = smoothn(para_map.copy(), isrobust=True, verbose=False)[1]
+            smed  = smoothn(para_map.copy(), isrobust=True, verbose=False, s=s)[0]
             xres, yres = self.block_size*500, self.block_size*500
             geotransform = (xmin, xres, 0, ymax, 0, -yres)
             nx, ny = smed.shape
-            dst_ds = gdal.GetDriverByName('GTiff').Create(self.example_file.split('_EV_') + \
-                                          '_EV_%s.tif'%para_names[i], ny, nx, 1, gdal.GDT_Float32)
+            dst_ds = gdal.GetDriverByName('GTiff').Create(self.example_file.split('MODIS_REFL.')[0] \
+                                          + 'atmo_paras/' + self.example_file.split('/')[-1].split('_EV_')[0] \
+                                          + '_EV_%s.tif'%para_names[i], ny, nx, 1, gdal.GDT_Float32)
+
             dst_ds.SetGeoTransform(geotransform)
             dst_ds.SetProjection(projection)
             dst_ds.GetRasterBand(1).WriteArray(smed)
@@ -225,32 +237,35 @@ class solve_aerosol(object):
         
     def _m_block_solver(self,block):
 	i,j = block
+        self.modis_logger.info('Doing block %03d-%03d.'%(i+1,j+1))
 	block_mask= np.zeros_like(self.modis_mask).astype(bool)
 	block_mask[i*self.block_size:(i+1)*self.block_size,j*self.block_size:(j+1)*self.block_size] = True        
-	boa, toa  = self.modis_boa[:, block_mask].reshape(7,self.block_size, self.block_size),\
-                    self.modis_toa[:, block_mask].reshape(7,self.block_size, self.block_size)
-	vza, sza  = (self.modis_angle[:2, block_mask]*np.pi/180.).reshape(2,self.block_size, self.block_size)
-	vaa, saa  = self.modis_angle[2:, block_mask].reshape(2,self.block_size, self.block_size)
-	boa_qa    = self.modis_boa_qa[:, block_mask].reshape(7,self.block_size, self.block_size)
 	mask      = self.modis_mask[block_mask].reshape(self.block_size, self.block_size)
 	prior     = self.aod550[block_mask].mean(), self.tcwv[block_mask].mean(), self.tco3[block_mask].mean()
-        elevation = self.elevation[block_mask].reshape(self.block_size, self.block_size)
-        brdf_std  = self.brdf_stds[:,block_mask].reshape(7, self.block_size, self.block_size)
-	self.atmo = solving_atmo_paras(self.modis_sensor, self.emus_dir, boa, toa, sza, vza, saa, vaa, \
-                                       elevation, boa_qa, boa_bands=[645,869,469,555,1240,1640,2130], mask=mask, \
-                                       band_indexs=[0,1,2,3,4,5,6], prior=prior, subsample=self.subsample, brdf_std=brdf_std)
-	self.atmo._load_unc()
-        self.atmo.aod_unc   = self.aod550_unc[block_mask].max()
-        self.atmo.wv_unc    = self.tcwv_unc  [block_mask].max()  
-        self.atmo.ozone_unc = self.tco3_unc  [block_mask].max()
-	self.atmo.AEE       = self.modis_AEE
-	self.atmo.bounds    = self.modis_bounds
 	if mask.sum() <= 0:
-	    print 'No valid values in block %03d-%03d'%(i,j)
+            self.modis_logger.warning('No valid values in block %03d-%03d, and priors are used for this block.'%(i+1,j+1))
+            return [i,j,[prior, 0], prior]
 	else:
-            self.modis_solved.append([i,j, self.atmo.optimization(), prior])
+            
+	    boa, toa  = self.modis_boa[:, block_mask].reshape(7,self.block_size, self.block_size),\
+			self.modis_toa[:, block_mask].reshape(7,self.block_size, self.block_size)
+	    vza, sza  = (self.modis_angle[:2, block_mask]*np.pi/180.).reshape(2,self.block_size, self.block_size)
+	    vaa, saa  = self.modis_angle[2:, block_mask].reshape(2,self.block_size, self.block_size)
+	    boa_qa    = self.modis_boa_qa[:, block_mask].reshape(7,self.block_size, self.block_size)
+	    elevation = self.elevation[block_mask].reshape(self.block_size, self.block_size)
+	    brdf_std  = self.brdf_stds[:,block_mask].reshape(7, self.block_size, self.block_size)
+	    self.atmo = solving_atmo_paras(self.modis_sensor, self.emus_dir, boa, toa, sza, vza, saa, vaa, \
+					   elevation, boa_qa, boa_bands=[645,869,469,555,1240,1640,2130], mask=mask, \
+					   band_indexs=[0,1,2,3,4,5,6], prior=prior, subsample=self.subsample, brdf_std=brdf_std)
+	    self.atmo._load_unc()
+	    self.atmo.aod_unc   = self.aod550_unc[block_mask].max()
+	    self.atmo.wv_unc    = self.tcwv_unc  [block_mask].max()  
+	    self.atmo.ozone_unc = self.tco3_unc  [block_mask].max()
+	    self.atmo.AEE       = self.modis_AEE
+	    self.atmo.bounds    = self.modis_bounds
+            return [i,j, self.atmo.optimization(), prior]
 
 if __name__ == "__main__":
     aero = solve_aerosol(17, 5, 2017, 247,mcd43_dir = '/home/ucfafyi/DATA/Multiply/MCD43/' )
-    aero.prepare_modis()
+    aero.getting_atmo_paras()
     #solved  = aero.prepare_modis()

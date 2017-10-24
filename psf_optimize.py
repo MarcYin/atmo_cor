@@ -102,6 +102,7 @@ class psf_optimize(object):
 
     def fire_shift_optimize(self,):
         #self.S2_PSF_optimization()
+        self._preprocess()
         min_val = [-50,-50]
         max_val = [50,50]
         ps, distributions = create_training_set([ 'xs', 'ys'], min_val, max_val, n_train=50)
@@ -110,12 +111,11 @@ class psf_optimize(object):
                                            np.array([i[1] for i in self.shift_solved])
 
         xs, ys = self.paras[self.costs==self.costs.min()][0].astype(int)
-        print 'Best shift is ', xs, ys, 'with the correlation of', 1-self.costs.min()
+        #print 'Best shift is ', xs, ys, 'with the correlation of', 1-self.costs.min()
         return xs, ys
 
 
     def fire_gaus_optimize(self,):
-        self._preprocess()
         xs, ys = self.fire_shift_optimize()
         if self.costs.min()<0.1:
             min_val = [12,12, -15,xs-2,ys-2]

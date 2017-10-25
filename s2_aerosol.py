@@ -10,6 +10,7 @@ import numpy as np
 from glob import glob
 from scipy import signal, ndimage
 import cPickle as pkl
+from osgeo import osr
 from smoothn import smoothn
 from grab_s2_toa import read_s2
 from multi_process import parmap
@@ -156,31 +157,14 @@ class solve_aerosol(object):
         self.elevation = ele.data[self.Hx, self.Hy]/1000.
         
         self.s2_logger.info('Getting pripors from ECMWF forcasts.')
-	sen_time_str = json.load(open(self.s2.s2_file_dir+'/tileInfo.json', 'r'))['timestamp']
-	sen_time     = datetime.datetime.strptime(sen_time_str, u'%Y-%m-%dT%H:%M:%S.%fZ') 
-	ind          = np.abs((sen_time.hour+sen_time.minute/60.+sen_time.second/3600.)-np.arange(0,25,3)).argmin() 
-	hour         = np.arange(0,25,3)[ind]
-	ecmwf_time   = datetime.datetime(sen_time.year, sen_time.month,sen_time.day, hour).strftime("%Y%m%dT%H%M%S")
-	aod_file     = '/aod550_' + ecmwf_time + '_global.tif'
-	tco3_file    = '/tco3_'   + ecmwf_time + '_global.tif'
+	sen_time_str    = json.load(open(self.s2.s2_file_dir+'/tileInfo.json', 'r'))['timestamp']
+      	self.sen_time   = datetime.datetime.strptime(sen_time_str, u'%Y-%m-%dT%H:%M:%S.%fZ') 
+        example_file    = self.s2.s2_file_dir+'/B04.jp2'
+        aod, tcwv, tco3 = np.array(self._read_cams(example_file))[:, self.Hx, self.Hy]
+        self.s2_aod550  = aod  * (1-0.14) # validation of +14% biase
+        self.s2_tco3    = tco3 * 46.698 * (1 - 0.05)
+        tcwv            = tcwv / 10. 
 
-	aod550         = reproject_data(self.cams_dir + aod_file, self.s2.s2_file_dir+'/B04.jp2')
-        aod550.get_it()
-        aod_scale      = float(aod550.g.GetMetadata()['aod550#scale_factor'])
-        aod_offset     = float(aod550.g.GetMetadata()['aod550#add_offset'])
-        self.s2_aod550 = (aod550.data*aod_scale + aod_offset)[self.Hx, self.Hy] * (1-0.14) # validation of +14% biase
-        mask           = (self.s2_aod550 <= 0.00045)
-        if mask.sum() >= 1:
-            self.s2_aod550[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.s2_aod550[~mask])
-	tco3           = reproject_data(self.cams_dir + tco3_file, self.s2.s2_file_dir+'/B04.jp2')
-        tco3.get_it()
-        tco3_scale     = float(tco3.g.GetMetadata()['gtco3#scale_factor'])
-        tco3_offset    = float(tco3.g.GetMetadata()['gtco3#add_offset'])
-        self.s2_tco3   = (tco3.data*tco3_scale + tco3_offset)\
-                          [self.Hx, self.Hy] * 46.698 * (1 - 0.05) # units and validation of +5% biase
-        mask           = (self.s2_tco3 <= 0.152)   
-        if mask.sum() >= 1:
-            self.s2_tco3[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.s2_tco3[~mask])
         self.s2_tco3_unc   = np.ones(self.s2_tco3.shape)   * 0.2
         self.s2_aod550_unc = np.ones(self.s2_aod550.shape) * 0.5
 
@@ -197,16 +181,7 @@ class solve_aerosol(object):
                                                     np.flatnonzero(~tcwv_mask), self.s2_tcwv[~tcwv_mask]) # simple interpolation
 	except:
             self.s2_logger.warning('Getting tcwv from the emulation of sen2cor look up table failed, ECMWF data used.')
-            tcwv_file      = '/tcwv_' + ecmwf_time + '_global.tif'
-            tcwv           = reproject_data(self.cams_dir + tcwv_file, self.s2.s2_file_dir+'/B04.jp2')
-            tcwv.get_it()
-            tcwv_scale     = float(tcwv.g.GetMetadata()['tcwv#scale_factor'])
-            tcwv_offset    = float(tcwv.g.GetMetadata()['tcwv#add_offset'])
-            self.s2_tcwv   = (tcwv.data*tcwv_scale + tcwv_offset)[self.Hx, self.Hy]/10.
-            mask           = (self.s2_tcwv <= 0.0054)
-            if mask.sum() >= 1:
-               self.s2_tcwv[mask] = np.interp(np.flatnonzero( mask), \
-                                              np.flatnonzero(~mask), self.s2_tcwv[~mask])
+            self.s2_tcwv     = tcwv
             self.s2_tcwv_unc = np.ones(self.s2_tcwv.shape) * 0.2
 
         self.s2_logger.info('Applying PSF model.')
@@ -282,6 +257,34 @@ class solve_aerosol(object):
                     np.all(self.s2_toa < 1, axis = 0)
         self.s2_mask = boa_mask & toa_mask & qua_mask & (~self.elevation.mask)
         self.s2_AEE, self.s2_bounds = self._load_emus(self.s2_sensor)
+
+    def _read_cams(self, example_file, parameters = ['aod550', 'tcwv', 'gtco3']):
+	netcdf_file = datetime.datetime(self.sen_time.year, self.sen_time.month, \
+					self.sen_time.day).strftime("%Y-%m-%d.nc")
+	template    = 'NETCDF:"%s":%s'
+	ind         = np.abs((self.sen_time.hour  + self.sen_time.minute/60. + \
+			      self.sen_time.second/3600.) - np.arange(0,25,3)).argmin()
+	sr         = osr.SpatialReference()
+	sr.ImportFromEPSG(4326)
+	proj       = sr.ExportToWkt()
+	results = []
+	for para in parameters:
+	    fname   = template%(self.cams_dir + '/' + netcdf_file, para)
+	    g       = gdal.Open(fname)
+	    g.SetProjection(proj)
+	    sub     = g.GetRasterBand(ind+1)
+	    offset  = sub.GetOffset()
+	    scale   = sub.GetScale()
+	    bad_pix = int(sub.GetNoDataValue())
+	    rep     = reproject_data(g, example_file)
+	    rep.get_it()
+	    data    = rep.g.GetRasterBand(ind+1).ReadAsArray()
+	    data    = data*scale + offset
+	    mask    = (data == (bad_pix*scale + offset))
+	    if mask.sum()>=1:
+		data[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), data[~mask])
+	    results.append(data)
+        return results
 
     def solving_s2_aerosol(self,):
         

@@ -8,6 +8,7 @@ import logging
 import numpy as np
 from glob import glob
 import cPickle as pkl
+from osgeo import osr
 from smoothn import smoothn
 from multi_process import parmap
 from reproject import reproject_data
@@ -36,10 +37,10 @@ class solve_aerosol(object):
 
         self.year        = year 
         self.doy         = doy
-        self.date        = datetime.datetime(self.year, 1, 1) \
+        this_date        = datetime.datetime(self.year, 1, 1) \
                                              + datetime.timedelta(self.doy - 1)
-        self.month       = self.date.month
-        self.day         = self.date.day
+        self.month       = this_date.month
+        self.day         = this_date.day
         self.h           = h
         self.v           = v
         self.mcd43_dir   = mcd43_dir
@@ -74,7 +75,7 @@ class solve_aerosol(object):
         
         self.modis_logger.info('Start to retrieve atmospheric parameters.')
         modis_l1b        =  MODIS_L1b_reader(self.mod_l1b_dir, "h%02dv%02d"%(self.h,self.v),self.year)
-        self.modis_files = [(i,modis_l1b.granules[i]) for i in modis_l1b.granules.keys() if i.date() == self.date.date()]
+        self.modis_files = [(i,modis_l1b.granules[i]) for i in modis_l1b.granules.keys() if i.date() == this_date.date()]
         self.modis_logger.info('%d MODIS file(s) is(are) found for doy %04d-%03d.'%(len(self.modis_files), self.year, self.doy))
         for timestamp, modis_file in self.modis_files:
             self._doing_one_file(modis_file, timestamp)
@@ -112,47 +113,18 @@ class solve_aerosol(object):
 	    self.modis_cloud = np.zeros_like(self.modis_toa[0]).astype(bool)
  
         self.modis_logger.info('Getting elevation.')
-        ele            = reproject_data(self.global_dem, self.example_file)
+        ele             = reproject_data(self.global_dem, self.example_file)
         ele.get_it()
-        mask           = ~np.isfinite(ele.data)
-        ele.data       = np.ma.array(ele.data, mask = mask)
-        self.elevation = ele.data/1000.
+        mask            = ~np.isfinite(ele.data)
+        ele.data        = np.ma.array(ele.data, mask = mask)
+        self.elevation  = ele.data/1000.
 
         self.modis_logger.info('Getting pripors from ECMWF forcasts.')
-        ind          = np.abs((self.sen_time.hour  + self.sen_time.minute/60. + \
-                       self.sen_time.second/3600.) - np.arange(0,25,3)).argmin()
-        hour         = np.arange(0,25,3)[ind]
-        ecmwf_time   = datetime.datetime(self.sen_time.year, self.sen_time.month, \
-                       self.sen_time.day, hour).strftime("%Y%m%dT%H%M%S")
-        aod_file     = '/aod550_' + ecmwf_time + '_global.tif'
-        tco3_file    = '/tco3_'   + ecmwf_time + '_global.tif'
-        tcwv_file    = '/tcwv_'   + ecmwf_time + '_global.tif'
+        aod, tcwv, tco3 = self._read_cams(self.example_file)
+        self.aod550     = aod  * (1-0.14) # validation of +14% biase
+        self.tco3       = tco3 * 46.698 * (1 - 0.05)
+        self.tcwv       = tcwv / 10.
 
-        aod550            = reproject_data(self.cams_dir + aod_file, self.example_file)
-        aod550.get_it()
-        aod_scale         = float(aod550.g.GetMetadata()['aod550#scale_factor'])
-        aod_offset        = float(aod550.g.GetMetadata()['aod550#add_offset'])
-        self.aod550       = (aod550.data*aod_scale + aod_offset) * (1-0.14) # validation of +14% biase
-        mask              = (self.aod550 <= 0.00045) 
-        if mask.sum()    >= 1:
-            self.aod550[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.aod550[~mask])
-
-        tco3              = reproject_data(self.cams_dir + tco3_file, self.example_file)
-        tco3.get_it()
-        tco3_scale        = float(tco3.g.GetMetadata()['gtco3#scale_factor'])
-        tco3_offset       = float(tco3.g.GetMetadata()['gtco3#add_offset'])
-        self.tco3         = (tco3.data*tco3_scale + tco3_offset) * 46.698 * (1 - 0.05) # units and validation of +5% biase
-        mask              = (self.tco3 <= 0.152) 
-        if mask.sum()    >= 1:
-            self.tco3[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.tco3[~mask])
-        tcwv              = reproject_data(self.cams_dir + tcwv_file, self.example_file)
-	tcwv.get_it()
-	tcwv_scale        = float(tcwv.g.GetMetadata()['tcwv#scale_factor'])
-	tcwv_offset       = float(tcwv.g.GetMetadata()['tcwv#add_offset'])
-	self.tcwv         = (tcwv.data*tcwv_scale + tcwv_offset)/10.
-        mask              = (self.tcwv <= 0.0054)     
-        if mask.sum()>=1:
-            self.tcwv[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), self.tcwv[~mask])
         self.tco3_unc   = np.ones(self.tco3.shape)   * 0.2
         self.aod550_unc = np.ones(self.aod550.shape) * 0.5
         self.tcwv_unc   = np.ones(self.tcwv.shape)   * 0.2
@@ -168,7 +140,35 @@ class solve_aerosol(object):
 	self.modis_mask = qua_mask & boa_mask & toa_mask & (~self.modis_cloud)
         self.modis_AEE, self.modis_bounds = self._load_emus(self.modis_sensor)
         self.modis_solved = []
-
+     
+    def _read_cams(self, example_file, parameters = ['aod550', 'tcwv', 'gtco3']):
+        netcdf_file = datetime.datetime(self.sen_time.year, self.sen_time.month, \
+                                        self.sen_time.day).strftime("%Y-%m-%d.nc")
+        template    = 'NETCDF:"%s":%s'
+        ind         = np.abs((self.sen_time.hour  + self.sen_time.minute/60. + \
+                              self.sen_time.second/3600.) - np.arange(0,25,3)).argmin() 
+        sr         = osr.SpatialReference()
+        sr.ImportFromEPSG(4326)
+        proj       = sr.ExportToWkt()
+        results = []
+        for para in parameters:
+            fname   = template%(self.cams_dir + '/' + netcdf_file, para)
+            g       = gdal.Open(fname)
+            g.SetProjection(proj)
+            sub     = g.GetRasterBand(ind+1)
+            offset  = sub.GetOffset()
+            scale   = sub.GetScale()
+            bad_pix = int(sub.GetNoDataValue())
+            rep     = reproject_data(g, example_file)
+            rep.get_it()
+            data    = rep.g.GetRasterBand(ind+1).ReadAsArray()
+            data    = data*scale + offset
+            mask    = (data == (bad_pix*scale + offset)) 
+            if mask.sum()>=1:
+                data[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), data[~mask])
+            results.append(data)
+        return results
+                   
     def solving_modis_aerosol(self,):
 
         self.modis_logger = logging.getLogger('MODIS Atmospheric Correction')
@@ -223,9 +223,9 @@ class solve_aerosol(object):
             xres, yres = self.block_size*500, self.block_size*500
             geotransform = (xmin, xres, 0, ymax, 0, -yres)
             nx, ny = smed.shape
-            dst_ds = gdal.GetDriverByName('GTiff').Create(self.example_file.split('MODIS_REFL.')[0] \
-                                          + 'atmo_paras/' + self.example_file.split('/')[-1].split('_EV_')[0] \
-                                          + '_EV_%s.tif'%para_names[i], ny, nx, 1, gdal.GDT_Float32)
+            dst_ds = gdal.GetDriverByName('GTiff').Create(self.mod_l1b_dir + '/atmo_paras/' + \
+                                                          self.example_file.split('/')[-1].split('_EV_')[0] \
+                                                          + '_EV_%s.tif'%para_names[i], ny, nx, 1, gdal.GDT_Float32)
 
             dst_ds.SetGeoTransform(geotransform)
             dst_ds.SetProjection(projection)

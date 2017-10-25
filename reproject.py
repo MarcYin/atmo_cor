@@ -14,12 +14,14 @@ class reproject_data(object):
     def __init__(self, source_img,
                  target_img   = None,
                  dstSRS       = None,
+                 verbose      = False,
                  (xmin, xmax) = (None, None),
                  (ymin, ymax) = (None, None),
                  (xRes, yRes) = (None, None)):
 
         self.source_img = source_img
         self.target_img = target_img
+        self.verbose    = verbose
         self.dstSRS     = dstSRS
         self.xmin       = xmin
         self.xmax       = xmax
@@ -48,10 +50,10 @@ class reproject_data(object):
         else:
             self.g = gdal.Warp('', self.source_img, format = 'MEM', outputBounds = \
                                [self.xmin, self.ymin, self.xmax, self.ymax], xRes = \
-                                self.xRes, yRes = self.yRes, dstSRS = self.dstSRS)
+                                self.xRes, yRes = self.yRes, dstSRS = self.dstSRS, copyMetadata=True)
         if self.g.RasterCount < 3:
             self.data = self.g.ReadAsArray()
-        else:
+        elif self.verbose:
             print 'There are %d bands in this file, use g.GetRasterBand(<band>) to avoid reading the whole file.'%self.g.RasterCount
 
 if __name__=='__main__':

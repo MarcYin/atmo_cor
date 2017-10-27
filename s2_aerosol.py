@@ -26,8 +26,10 @@ class solve_aerosol(object):
     Prepareing modis data to be able to pass into 
     atmo_cor for the retrieval of atmospheric parameters.
     '''
-    def __init__(self,h,v,
-                 year, doy,
+    def __init__(self,
+                 year, 
+                 month, 
+                 day,
                  emus_dir    = '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',
                  mcd43_dir   = '/data/selene/ucfajlg/Ujia/MCD43/',
                  s2_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/s_data/',
@@ -45,13 +47,14 @@ class solve_aerosol(object):
                  reconstruct_s2_angle = True):
 
         self.year        = year 
-        self.doy         = doy
-        self.date        = datetime.datetime(self.year, 1, 1) \
-                                             + datetime.timedelta(self.doy - 1)
-        self.month       = self.date.month
-        self.day         = self.date.day
-        self.h           = h
-        self.v           = v
+        self.month       = month
+        self.day         = day
+        self.date        = datetime.datetime(self.year, self.month, self.day)
+        self.doy         = self.date.timetuple().tm_yday
+        #self.date        = datetime.datetime(self.year, 1, 1) \
+        #                                     + datetime.timedelta(self.doy - 1)
+        #self.h           = h
+        #self.v           = v
         self.mcd43_dir   = mcd43_dir
         self.emus_dir    = emus_dir
         self.qa_thresh   = qa_thresh
@@ -67,9 +70,7 @@ class solve_aerosol(object):
         self.s2_full_res = (10980, 10980)
         self.s_subsample = 1
         self.aero_res    = 3050
-        mcd43_tmp        = '%s/MCD43A1.A%d%03d.h%02dv%02d.006.*.hdf'
-        self.mcd43_file  = glob(mcd43_tmp%(self.mcd43_dir,\
-                                 self.year, self.doy, self.h, self.v))[0]
+        self.mcd43_tmp   = '%s/MCD43A1.A%d%03d.%s.006.*.hdf'
 
         self.reconstruct_s2_angle  = reconstruct_s2_angle
         self.s2_spectral_transform = [[ 1.06946607,  1.03048916,  1.04039226,  1.00163932,  1.00010918, 0.95607606,  0.99951677],
@@ -108,43 +109,72 @@ class solve_aerosol(object):
     def _s2_aerosol(self,):
         
         self.s2_logger.propagate = False
-        self.s2_logger.info('Start to retrieve atmospheric parameters')
+        self.s2_logger.info('Start to retrieve atmospheric parameters.')
         self.s2 = read_s2(self.s2_toa_dir, self.s2_tile, self.year, self.month, self.day, self.s2_u_bands)
+        self.s2_logger.info('Reading in TOA reflectance.')
 	selected_img = self.s2.get_s2_toa() 
 	self.s2.get_s2_cloud()
-        self.s2.cloud[:] = False # due to the bad cloud algrithm 
+        #self.s2.cloud[:] = False # due to the bad cloud algrithm 
         self.s2_logger.info('Find corresponding pixels between S2 and MODIS tiles')
         tiles = Find_corresponding_pixels(self.s2.s2_file_dir+'/B04.jp2', destination_res=500) 
-        self.H_inds, self.L_inds = tiles['h%02dv%02d'%(self.h, self.v)]
-	self.Lx, self.Ly = self.L_inds
-	self.Hx, self.Hy = self.H_inds
+        if len(tiles.keys())>1:
+            self.logger.info('This sentinel 2 tile covers %d MODIS tile.'%len(tiles.keys()))
+        self.mcd43_files = []
+        szas, vzas, saas, vaas, raas          = [], [], [], [], []
+        boas, boa_qas, brdf_stds, Hxs, Hys    = [], [], [], [], []
+        for key in tiles.keys():
+            #h,v = int(key[1:3]), int(key[-2:])
+            self.s2_logger.info('Getting BOA from MODIS tile: %s.'%key)
+            mcd43_file  = glob(self.mcd43_tmp%(self.mcd43_dir, self.year, self.doy, key))[0]
+            self.mcd43_files.append(mcd43_file)
+            self.H_inds, self.L_inds = tiles[key]
+	    Lx, Ly = self.L_inds
+	    Hx, Hy = self.H_inds
+            Hxs.append(Hx); Hys.append(Hy)
+            self.s2_logger.info( 'Getting the angles and simulated surface reflectance.')
+            self.s2.get_s2_angles(self.reconstruct_s2_angle, slic = [Hx, Hy])
+ 
+	    if self.reconstruct_s2_angle:
+		self.s2_angles = np.zeros((4, 6, len(Hx)))
+		hx, hy = (Hx*23/10980.).astype(int), (Hy*23/10980.).astype(int) # index the 23*23 sun angles
+		for j, band in enumerate (self.s2_u_bands[:-2]):
+		    self.s2_angles[[0,2],j,:] = self.s2.angles['vza'][band]/100.,  self.s2.angles['vaa'][band]/100. 
+		    self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy],self.s2.angles['saa'][hx, hy]
 
-        self.s2_logger.info( 'Getting the angles and simulated surface reflectance')
-        self.s2.get_s2_angles(self.reconstruct_s2_angle, slic = [self.Hx, self.Hy])
-        if self.reconstruct_s2_angle:
-	    self.s2_angles = np.zeros((4, 6, len(self.Hx)))
-            hx, hy = (self.Hx*23/10980.).astype(int), (self.Hy*23/10980.).astype(int) # index the 23*23 sun angles
-            for j, band in enumerate (self.s2_u_bands[:-2]):
-                self.s2_angles[[0,2],j,:] = self.s2.angles['vza'][band]/100.,  self.s2.angles['vaa'][band]/100. 
-                self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy],self.s2.angles['saa'][hx, hy]
+	    else:
+		self.s2_angles = np.zeros((4, 6, len(Hx)))
+		hx, hy = (Hx*23/10980.).astype(int), (Hy*23/10980.).astype(int) # index the 23*23 sun angles
+		for j, band in enumerate (self.s2_u_bands[:-2]):
+		    self.s2_angles[[0,2],j,:] = self.s2.angles['vza'][band][hx, hy],self.s2.angles['vaa'][band][hx, hy]
+		    self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy],self.s2.angles['saa'][hx, hy]
 
-        else:
-            self.s2_angles = np.zeos((4, 6, len(self.Hx)))
-            self.s2_angles[[1,-1],...] = self.s2.angles['msz'], self.s2.angles['msa']
-            for i, angle in [[0,'mvz'], [2,'mva']]:
-                for j, band in enumerate (self.s2_u_bands[:-2]):
-                    self.s2_angles[i][j] = self.s2.angles[angle][band]
-
-        #use mean value to fill bad values
-        for i in range(4):
-            m = ~np.isfinite(self.s2_angles[i])
-            self.s2_angles[i][m] = np.nanmean(self.s2_angles[i])
-        vza, sza = self.s2_angles[:2]
-	raa      = self.s2_angles[2] - self.s2_angles[3]
-
-        # get the simulated surface reflectance
-        self.s2_boa, self.s2_boa_qa,self.brdf_stds = get_brdf_six(self.mcd43_file, angles=[vza, sza, raa],\
-                                                                  bands=(3,4,1,2,6,7), Linds= [self.Lx, self.Ly])
+	    #use mean value to fill bad values
+	    for i in range(4):
+		mask = ~np.isfinite(self.s2_angles[i])
+		if mask.sum()>0:
+		    self.s2_angles[i][mask] = np.interp(np.flatnonzero(mask), \
+							np.flatnonzero(~mask),  self.s2_angles[i][~mask]) # simple interpolation
+	    vza, sza = self.s2_angles[:2]
+	    vaa, saa = self.s2_angles[2:]
+            raa      = vaa - saa
+            szas.append(sza); vzas.append(vza); raas.append(raa); vaas.append(vaa); saas.append(saa)
+         
+	    # get the simulated surface reflectance
+	    s2_boa, s2_boa_qa, brdf_std = get_brdf_six(mcd43_file, angles=[vza, sza, raa],\
+                                                       bands=(3,4,1,2,6,7), Linds= [Lx, Ly])
+            boas.append(s2_boa); boa_qas.append(s2_boa_qa); brdf_stds.append(brdf_std)
+        
+	self.s2_boa    = np.hstack(boas)
+	self.s2_boa_qa = np.hstack(boa_qas)
+	self.brdf_stds = np.hstack(brdf_stds)
+	self.Hx        = np.hstack(Hxs)
+	self.Hy        = np.hstack(Hys)
+        vza            = np.hstack(vzas)
+        sza            = np.hstack(szas)
+        vaa            = np.hstack(vaas)
+        saa            = np.hstack(saas)
+        raa            = np.hstack(raas)
+        self.s2_angles = np.array([vza, sza, vaa, saa])
         #self.s2_boa, self.s2_boa_qa = self.s2_boa.flatten(), self.s2_boa_qa.flatten()
         self.s2_logger.info('Applying spectral transform.')
         self.s2_boa = self.s2_boa*np.array(self.s2_spectral_transform)[0,:-1][...,None] + \
@@ -174,7 +204,7 @@ class solve_aerosol(object):
                                 np.repeat(np.repeat(selected_img['B09']*0.0001, 6, axis=0), 6, axis=1)[self.Hx, self.Hy]
 	    wv_emus   = pkl.load(open(self.wv_emus_dir, 'rb'))
 	    inputs    = np.array([b9, b8a, vza[-1], sza[-1], abs(raa)[-1], self.elevation]).T
-            tcwv_mask = b8a < 0.05 
+            tcwv_mask = b8a < 0.1 
 	    self.s2_tcwv, self.s2_tcwv_unc, _ = wv_emus.predict(inputs, do_unc = True)
             if tcwv_mask.sum() >= 1:
                 self.s2_tcwv[tcwv_mask] = np.interp(np.flatnonzero( tcwv_mask), \
@@ -187,10 +217,10 @@ class solve_aerosol(object):
         self.s2_logger.info('Applying PSF model.')
         if self.s2_psf is None:
             self.s2_logger.info('No PSF parameters specified, start solving.')
-            high_img    = np.repeat(np.repeat(selected_img['B12'], 2, axis=0), 2, axis=1)*0.0001
-            high_indexs = self.H_inds
-            low_img     = self.s2_boa[-2]
-            qa, cloud   = self.s2_boa_qa[-2], self.s2.cloud
+            high_img    = np.repeat(np.repeat(selected_img['B11'], 2, axis=0), 2, axis=1)*0.0001
+            high_indexs = self.Hx, self.Hy
+            low_img     = self.s2_boa[4]
+            qa, cloud   = self.s2_boa_qa[4], self.s2.cloud
             psf         = psf_optimize(high_img, high_indexs, low_img, qa, cloud, 2)
             xs, ys      = psf.fire_shift_optimize()
             xstd, ystd  = 29.75, 39
@@ -206,7 +236,7 @@ class solve_aerosol(object):
                                               (self.Hy+int(ys)<self.s2_full_res[0])))
         
         self.Hx, self.Hy = self.Hx[shifted_mask]+int(xs), self.Hy[shifted_mask]+int(ys)
-        self.Lx, self.Ly = self.Lx[shifted_mask], self.Ly[shifted_mask]
+        #self.Lx, self.Ly = self.Lx[shifted_mask], self.Ly[shifted_mask]
         self.s2_boa      = self.s2_boa[:,shifted_mask]
         self.s2_boa_qa   = self.s2_boa_qa[:, shifted_mask]
         self.s2_angles   = self.s2_angles[:,:,shifted_mask]
@@ -313,7 +343,7 @@ class solve_aerosol(object):
         #        self.s2_logger.info('Doing block %03d-%03d.'%(i+1,j+1))
         #        self._s2_block_solver([i,j])
         blocks = zip(np.repeat(range(num_blocks), num_blocks), np.tile(range(num_blocks), num_blocks)) 
-        self.s2_solved = parmap(aero._s2_block_solver, blocks)   
+        self.s2_solved = parmap(self._s2_block_solver, blocks)   
         inds = np.array([[i[0], i[1]] for i in self.s2_solved])
         rets = np.array([i[2][0]      for i in self.s2_solved])
           
@@ -327,7 +357,7 @@ class solve_aerosol(object):
         tco3_map[inds[:,0], inds[:,1]] = rets[:,2]
         para_names = 'aod550', 'tcwv', 'tco3'
          
-        g = gdal.Open(self.s2.s2_file_dir+'/10meter.vrt')
+        g = gdal.Open(self.s2.s2_file_dir+'/B04.jp2')
         xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
         projection = g.GetProjection()
         
@@ -384,7 +414,7 @@ class solve_aerosol(object):
         
 
 if __name__ == "__main__":
-    aero = solve_aerosol(17, 5, 2017, 247,mcd43_dir = '/home/ucfafyi/DATA/Multiply/MCD43/', \
+    aero = solve_aerosol( 2017, 9, 4, mcd43_dir = '/home/ucfafyi/DATA/Multiply/MCD43/', \
                                    emus_dir = '/home/ucfafyi/DATA/Multiply/', s2_tile='29SQB', s2_psf=None)
     aero.solving_s2_aerosol()
     #solved  = aero.prepare_modis()

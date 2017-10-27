@@ -29,15 +29,15 @@ class psf_optimize(object):
     def _preprocess(self,):
      
         size = 2*int(round(max(1.96*50, 1.96*50)))# set the largest possible PSF size
-        self.high_img[0,:]=self.high_img[-1,:]=self.high_img[:,0]=self.high_img[:,-1]=0
+        self.high_img[0,:]=self.high_img[-1,:]=self.high_img[:,0]=self.high_img[:,-1]= -9999
         self.bad_pixs = cloud_dilation( (self.high_img <= 0) | self.cloud  | (self.high_img >= 1), iteration=size/2)
 
         xstd, ystd = 29.75, 39
         ker = self.gaussian(xstd, ystd, 0)
         self.conved = signal.fftconvolve(self.high_img, ker, mode='same')
 
-        l_mask = ~self.low_img.mask & (self.qa<=self.qa_thresh)
-        h_mask = ~self.bad_pixs[self.Hx, self.Hy]
+        l_mask = (~self.low_img.mask) & (self.qa<=self.qa_thresh)
+        h_mask =  ~self.bad_pixs[self.Hx, self.Hy]
         self.lh_mask = l_mask & h_mask
 
     def gaussian(self, xstd, ystd, angle, norm = True):

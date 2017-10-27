@@ -37,10 +37,10 @@ class solve_aerosol(object):
 
         self.year        = year 
         self.doy         = doy
-        this_date        = datetime.datetime(self.year, 1, 1) \
+        self.date        = datetime.datetime(self.year, 1, 1) \
                                              + datetime.timedelta(self.doy - 1)
-        self.month       = this_date.month
-        self.day         = this_date.day
+        self.month       = self.date.month
+        self.day         = self.date.day
         self.h           = h
         self.v           = v
         self.mcd43_dir   = mcd43_dir
@@ -75,11 +75,11 @@ class solve_aerosol(object):
         
         self.modis_logger.info('Start to retrieve atmospheric parameters.')
         modis_l1b        =  MODIS_L1b_reader(self.mod_l1b_dir, "h%02dv%02d"%(self.h,self.v),self.year)
-        self.modis_files = [(i,modis_l1b.granules[i]) for i in modis_l1b.granules.keys() if i.date() == this_date.date()]
+        self.modis_files = [(i,modis_l1b.granules[i]) for i in modis_l1b.granules.keys() if i.date() == self.date.date()]
         self.modis_logger.info('%d MODIS file(s) is(are) found for doy %04d-%03d.'%(len(self.modis_files), self.year, self.doy))
         for timestamp, modis_file in self.modis_files:
             self._doing_one_file(modis_file, timestamp)
-            break
+            #break
 
     def _doing_one_file(self, modis_file, timestamp):
         self.modis_logger.info('Doing %s.'%modis_file.b1.split('/')[-1].split('_EV_')[0])

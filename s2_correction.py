@@ -3,13 +3,14 @@ import sys
 sys.path.insert(0,'python')
 import gdal
 import numpy as np
+from numpy import clip, uint8
 from glob import glob
 import logging
 from Py6S import *
 import cPickle as pkl
 from multi_process import parmap
 from grab_s2_toa import read_s2
-from aerosol_solver import solve_aerosol
+#from aerosol_solver import solve_aerosol
 from reproject import reproject_data
 from emulation_engine import AtmosphericEmulationEngine
 
@@ -98,6 +99,11 @@ class atmospheric_correction(object):
                              self._10meter_saa, self._10meter_vaa, self._10meter_aod,\
                              self._10meter_tcwv, self._10meter_tco3, self._10meter_ele,\
                              self._10meter_band_indexs)     
+        self.toa_rgb = clip(self._10meter_ref[[2,1,0], ...].transpose(1,2,0)*255/0.25, 0., 255.).astype(uint8)
+        self.boa_rgb = clip(self.boa         [[2,1,0], ...].transpose(1,2,0)*255/0.25, 0., 255.).astype(uint8)
+        self._save_rgb(self.toa_rgb, 'TOA_RGB.tif', self.s2.s2_file_dir+'/B04.jp2')
+        self._save_rgb(self.boa_rgb, 'BOA_RGB.tif', self.s2.s2_file_dir+'/B04.jp2')
+
 
         del self._10meter_ref; del self._10meter_vza; del self._10meter_vaa;  del self._10meter_sza 
         del self._10meter_saa; del self._10meter_aod; del self._10meter_tcwv; del self._10meter_tco3; del self._10meter_ele
@@ -140,6 +146,7 @@ class atmospheric_correction(object):
         self.sur_refs.update(dict(zip(['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'], self.boa)))
         self._save_img(self.boa, ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']); del self.boa
 
+
         self.logger.info('Doing 60 meter bands')
         self._60meter_ref = np.array([all_refs[band]/10000. for band \
                                       in ['B01', 'B09', 'B10']])
@@ -173,6 +180,21 @@ class atmospheric_correction(object):
         self.sur_refs.update(dict(zip(['B01', 'B09', 'B10'], self.boa)))
         self._save_img(self.boa, ['B01', 'B09', 'B10']); del self.boa
         del all_refs; del self.s2.selected_img; del all_angs; del self.s2.angles
+  
+    def _save_rgb(self, rgb_array, name, source_image):
+        g            = gdal.Open(source_image)
+        projection   = g.GetProjection()
+        geotransform = g.GetGeoTransform()
+        nx, ny = rgb_array.shape[:2]
+        dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
+                                '/%s'%name, ny, nx, 3, gdal.GDT_Byte)
+        dst_ds.SetGeoTransform(geotransform)
+        dst_ds.SetProjection(projection)
+        dst_ds.GetRasterBand(1).WriteArray(rgb_array[:,:,0])
+        dst_ds.GetRasterBand(2).WriteArray(rgb_array[:,:,1])
+        dst_ds.GetRasterBand(3).WriteArray(rgb_array[:,:,2])
+        dst_ds.FlushCache()
+        dst_ds = None
 
     def _save_img(self, refs, bands):
         g            = gdal.Open(self.s2.s2_file_dir+'/%s.jp2'%bands[0])

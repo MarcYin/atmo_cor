@@ -3,8 +3,10 @@ import sys
 sys.path.insert(0,'python')
 import gdal
 import numpy as np
+from numpy import clip, uint8
 from glob import glob
 import logging
+import datetime 
 from Py6S import *
 import cPickle as pkl
 from multi_process import parmap
@@ -34,7 +36,7 @@ class atmospheric_correction(object):
         self.sur_refs    = {}
         self.date        = datetime.datetime(year, 1, 1) + datetime.timedelta(doy - 1)
         self.month       = self.date.month
-        self.day        = self.date.date
+        self.day        = self.date.day
 	self.logger = logging.getLogger('MODIS Atmospheric Correction')
 	self.logger.setLevel(logging.INFO)
         if not self.logger.handlers:       
@@ -61,25 +63,27 @@ class atmospheric_correction(object):
         self.logger.propagate = False
         self.modis_sensor = 'TERRA'
         self.logger.info('Loading emulators.')
+        self._load_xa_xb_xc_emus()
+        self.logger.info('Finding MODIS files.')
         modis_l1b        =  MODIS_L1b_reader(self.mod_l1b_dir, "h%02dv%02d"%(self.h,self.v),self.year)
-        self.modis_files = [(i,modis_l1b.granules[i]) for i in modis_l1b.granules.keys() if i.date() == self.date.date]
-        self.modis_logger.info('%d MODIS file(s) is(are) found for doy %04d-%03d.'%(len(self.modis_files), self.year, self.doy))
+        self.modis_files = [(i,modis_l1b.granules[i]) for i in modis_l1b.granules.keys() if i.date() == self.date.date()]
+        self.logger.info('%d MODIS file(s) is(are) found for doy %04d-%03d.'%(len(self.modis_files), self.year, self.doy))
         for timestamp, modis_file in self.modis_files:
             self._doing_one_file(modis_file, timestamp)
-            break
+            #break
 
     def _doing_one_file(self, modis_file, timestamp):
-        self.modis_logger.info('Doing %s.'%modis_file.b1.split('/')[-1].split('_EV_')[0])
+        self.logger.info('Doing %s.'%modis_file.b1.split('/')[-1].split('_EV_')[0])
         band_files  = [getattr(modis_file, 'b%d'%band) for band in range(1,8)]
         angle_files = [getattr(modis_file, ang) for ang in ['sza', 'vza', 'saa', 'vaa']]
         modis_toa   = []
         modis_angle = []
         f           = lambda fname: gdal.Open(fname).ReadAsArray()
 
-        self.modis_logger.info('Reading in MODIS TOA.')
+        self.logger.info('Reading in MODIS TOA.')
         modis_toa   = parmap(f, band_files)
 
-        self.modis_logger.info('Reading in angles.')
+        self.logger.info('Reading in angles.')
         modis_angle = parmap(f, angle_files)
 
         scale  = np.array(modis_file.scale)
@@ -101,17 +105,17 @@ class atmospheric_correction(object):
 
  
         
-    def get_control_variables(selfi,):
+    def get_control_variables(self,):
 
-        aod = reproject_data(self.modis_toa_dir+'/atmo_paras/' + \
+        aod = reproject_data(self.mod_l1b_dir+'/atmo_paras/' + \
                              self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_aod550.tif', self.example_file)
         aod.get_it()
 
-        tcwv = reproject_data(self.modis_toa_dir+'/atmo_paras/' + \
+        tcwv = reproject_data(self.mod_l1b_dir+'/atmo_paras/' + \
                               self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_tcwv.tif', self.example_file)
         tcwv.get_it()
 
-        tco3 = reproject_data(self.modis_toa_dir+'/atmo_paras/' +\
+        tco3 = reproject_data(self.mod_l1b_dir+'/atmo_paras/' +\
                               self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_tco3.tif', self.example_file)
         tco3.get_it()
 
@@ -124,13 +128,8 @@ class atmospheric_correction(object):
 
         return aod.data, tcwv.data, tco3.data, ele.data
 
-	self.sur_refs.update(dict(zip(['B02', 'B03', 'B04', 'B08'], self.boa)))
-        self._save_img(self.boa, ['B02', 'B03', 'B04', 'B08']); del self.boa 
-	  
-        del all_refs; del self.s2.selected_img; del all_angs; del self.s2.angles
-
     def _save_img(self, refs, bands):
-        g            = gdal.Open(self.s2.s2_file_dir+'/%s.jp2'%bands[0])
+        g            = gdal.Open(self.example_file)
         projection   = g.GetProjection()
         geotransform = g.GetGeoTransform()
         bands_refs   = zip(bands, refs)
@@ -140,36 +139,28 @@ class atmospheric_correction(object):
     def _save_band(self, band_ref, projection, geotransform):
         band, ref = band_ref
         nx, ny = ref.shape
-        dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
-                                '/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
+        dst_ds = gdal.GetDriverByName('GTiff').Create(self.mod_l1b_dir+ '/sur_ref/'+\
+                                self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_500_SurRef_b%02d.tif'%band, ny, nx, 1, gdal.GDT_Float32)
         dst_ds.SetGeoTransform(geotransform)    
         dst_ds.SetProjection(projection) 
         dst_ds.GetRasterBand(1).WriteArray(ref)
         dst_ds.FlushCache()                  
         dst_ds = None
 
-    def get_control_variables(self, target_band):
-
-	aod = reproject_data(self.s2.s2_file_dir+'/aod550.tif', \
-                             self.s2.s2_file_dir+'/%s.jp2'%target_band)
-        aod.get_it()
-
-        tcwv = reproject_data(self.s2.s2_file_dir+'/tcwv.tif', \
-                              self.s2.s2_file_dir+'/%s.jp2'%target_band)
-        tcwv.get_it()
-
-        tco3 = reproject_data(self.s2.s2_file_dir+'/tco3.tif', \
-                              self.s2.s2_file_dir+'/%s.jp2'%target_band)
-        tco3.get_it()
-
-        ele = reproject_data(self.global_dem, self.s2.s2_file_dir+'/%s.jp2'%target_band)
-        ele.get_it()
-        mask = ~np.isfinite(ele.data)
-        ele.data[mask] = np.interp(np.flatnonzero(mask), \
-                                   np.flatnonzero(~mask), ele.data[~mask]) # simple interpolation
-
-        return aod.data, tcwv.data, tco3.data, ele.data
-
+    def _save_rgb(self, rgb, name):
+        g            = gdal.Open(self.example_file)
+        projection   = g.GetProjection()
+        geotransform = g.GetGeoTransform()
+        nx, ny       = rgb.shape[:2]
+        dst_ds = gdal.GetDriverByName('GTiff').Create(self.mod_l1b_dir+ '/sur_ref/'+\
+                                self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_500_%s_.tif'%name, ny, nx, 3, gdal.GDT_Byte)
+        dst_ds.SetGeoTransform(geotransform)
+        dst_ds.SetProjection(projection)
+        dst_ds.GetRasterBand(1).WriteArray(rgb[:,:,0])
+        dst_ds.GetRasterBand(2).WriteArray(rgb[:,:,1])
+        dst_ds.GetRasterBand(3).WriteArray(rgb[:,:,2])
+        dst_ds.FlushCache()
+        dst_ds = None
 
     def fire_correction(self, toa, sza, vza, saa, vaa, aod, tcwv, tco3, elevation, band_indexs):
         self._toa         = toa
@@ -185,13 +176,15 @@ class atmospheric_correction(object):
         rows              = np.repeat(np.arange(self._num_blocks), self._num_blocks)
         columns           = np.tile(np.arange(self._num_blocks), self._num_blocks)
         blocks            = zip(rows, columns)
-        ret = parmap(self._s2_block_correction_emus_xa_xb_xc, blocks)
-        #ret = parmap(self._s2_block_correction_6s, blocks)
-        #ret               = parmap(self._s2_block_correction_emus, blocks) 
-        self.boa = np.array([i[2] for i in ret]).reshape(self._num_blocks, self._num_blocks, toa.shape[0], \
-                             self._block_size, self._block_size).transpose(2,0,3,1,4).reshape(toa.shape[0], \
-                             self._num_blocks*self._block_size, self._num_blocks*self._block_size)
+        ret = parmap(self._block_correction_emus_xa_xb_xc, blocks)
+        self.sur_ref      = np.array([i[2] for i in ret]).reshape(self._num_blocks, self._num_blocks, toa.shape[0], \
+                                      self._block_size, self._block_size).transpose(2,0,3,1,4).reshape(toa.shape[0], \
+                                      self._num_blocks*self._block_size, self._num_blocks*self._block_size)
                         
+        self._save_img(self.sur_ref, [1, 2, 3, 4, 5, 6, 7])
+        self.boa_rgb = clip(self.sur_ref[[0,3,2], ...].transpose(1,2,0)*255/0.25, 0,255.).astype(uint8)
+        self.toa_rgb = clip(self._toa   [[0,3,2], ...].transpose(1,2,0)*255/0.25, 0,255.).astype(uint8)
+        self._save_rgb(self.boa_rgb, 'BOA_RGB'); self._save_rgb(self.toa_rgb, 'TOA_RGB')
         del self._toa; del self._sza; del self._vza;  del self._saa
         del self._vaa; del self._aod; del self._tcwv; del self._tco3; del self._elevation
 
@@ -215,7 +208,7 @@ class atmospheric_correction(object):
 	s.run()
 	return s.outputs.coef_xap, s.outputs.coef_xbp, s.outputs.coef_xcp
 
-    def _s2_block_correction_emus_xa_xb_xc(self, block):
+    def _block_correction_emus_xa_xb_xc(self, block):
         i, j      = block
         self.logger.info('Block %03d--%03d'%(i+1,j+1))
         slice_x   = slice(i*self._block_size,(i+1)*self._block_size, 1)
@@ -232,7 +225,7 @@ class atmospheric_correction(object):
         elevation = self._elevation[slice_x,slice_y]/1000.
         corfs = []
         for bi, band in enumerate(self._band_indexs):    
-            p = [self._block_mean(i, self._mean_size).ravel() for i in \
+            p = [self._block_mean(item, self._mean_size).ravel() for item in \
                  [np.cos(sza), np.cos(vza), np.cos(saa - vaa), aod, tcwv, tco3, elevation]] 
 
             a = self.xap_emus[band].predict(np.array(p).T)[0].reshape(self._block_size//self._mean_size, \
@@ -244,8 +237,8 @@ class atmospheric_correction(object):
             a = np.repeat(np.repeat(a, self._mean_size, axis=0), self._mean_size, axis=1)
             b = np.repeat(np.repeat(b, self._mean_size, axis=0), self._mean_size, axis=1)
             c = np.repeat(np.repeat(c, self._mean_size, axis=0), self._mean_size, axis=1)
-            y     = a * toa[bi] -b
-            corf  = y / (1 + c*y)
+            y     = a * toa[bi] - b
+            corf  = y / (1 + c * y)
             corfs.append(corf)
         boa = np.array(corfs)
         return [i, j, boa]

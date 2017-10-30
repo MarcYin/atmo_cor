@@ -72,7 +72,7 @@ class read_s2(object):
         return self.selected_img
 
     def get_s2_cloud(self,):
-        if glob(self.s2_file_dir+'/cloud.tiff')==[]:
+        if glob(self.s2_file_dir+'/cloud.tiff1')==[]:
             print 'loading Sentinel2 data...'
             needed_bands = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A'
             if self.selected_img is None:
@@ -94,7 +94,7 @@ class read_s2(object):
             cl = classification(img = img)
             cl.Get_cm_p()
             g=None; g1=None
-            self.cloud = cl.cm
+            self.cloud = cl.fcm
             g = gdal.Open(self.s2_file_dir+'/B04.jp2')
             driver = gdal.GetDriverByName('GTiff')
             g1 = driver.Create(self.s2_file_dir+'/cloud.tiff', \

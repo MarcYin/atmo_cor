@@ -45,7 +45,7 @@ class solving_atmo_paras(object):
         if subsample is None:
             self.subsample = 1
         else:
-           self.subsample  = subsample
+            self.subsample  = subsample
         self.subsample_sta = subsample_start
     
     def _load_emus(self):
@@ -213,7 +213,7 @@ class solving_atmo_paras(object):
         An optimization function used for the retrieval of atmospheric parameters
         '''        
         p0     = self.prior 
-        psolve1 = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint=-1, \
+        psolve1 = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint=1, \
                                          pgtol=1e-6,factr=1000, bounds=self.bounds,fprime=None)
         #psolve2 = optimize.fmin(self.fmin_cost, p0, full_output=True, maxiter=100, maxfun=150, disp=0)
         return psolve1#, psolve2

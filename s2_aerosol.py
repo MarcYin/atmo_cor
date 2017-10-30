@@ -44,7 +44,7 @@ class solve_aerosol(object):
                  qa_thresh   = 255,
                  verbose     = True,
                  aero_res    = 3050, # resolution for aerosol retrival in meters should be larger than 500
-                 reconstruct_s2_angle = True):
+                 reconstruct_s2_angle = False):
 
         self.year        = year 
         self.month       = month

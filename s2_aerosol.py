@@ -191,12 +191,12 @@ class solve_aerosol(object):
       	self.sen_time   = datetime.datetime.strptime(sen_time_str, u'%Y-%m-%dT%H:%M:%S.%fZ') 
         example_file    = self.s2.s2_file_dir+'/B04.jp2'
         aod, tcwv, tco3 = np.array(self._read_cams(example_file))[:, self.Hx, self.Hy]
-        self.s2_aod550  = aod  * (1-0.14) # validation of +14% biase
-        self.s2_tco3    = tco3 * 46.698 * (1 - 0.05)
+        self.s2_aod550  = aod  #* (1-0.14) # validation of +14% biase
+        self.s2_tco3    = tco3 * 46.698 #* (1 - 0.05)
         tcwv            = tcwv / 10. 
 
         self.s2_tco3_unc   = np.ones(self.s2_tco3.shape)   * 0.2
-        self.s2_aod550_unc = np.ones(self.s2_aod550.shape) * 0.5
+        self.s2_aod550_unc = np.ones(self.s2_aod550.shape) * 1.0
 
         self.s2_logger.info('Trying to get the tcwv from the emulation of sen2cor look up table.')
         try:

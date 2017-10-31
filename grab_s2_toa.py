@@ -8,6 +8,7 @@ import numpy as np
 from multiprocessing import Pool
 from glob import glob
 from cloud import classification
+from scipy.interpolate import griddata
 import subprocess
 import copy
 
@@ -72,7 +73,7 @@ class read_s2(object):
         return self.selected_img
 
     def get_s2_cloud(self,):
-        if glob(self.s2_file_dir+'/cloud.tiff1')==[]:
+        if glob(self.s2_file_dir+'/cloud.tiff')==[]:
             print 'loading Sentinel2 data...'
             needed_bands = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A'
             if self.selected_img is None:
@@ -170,7 +171,18 @@ class read_s2(object):
 		    for i in mvia.findall('Mean_Viewing_Incidence_Angle'):
 			mvz[int(i.attrib['bandId'])] = float(i.find('ZENITH_ANGLE').text)
 			mva[int(i.attrib['bandId'])] = float(i.find('AZIMUTH_ANGLE').text)
-	self.saa, self.sza = np.array(saa).astype(float), np.array(sza).astype(float)
+        sza  = np.array(sza).astype(float)
+        saa  = np.array(saa).astype(float)
+        mask = np.isnan(sza)
+        sza  = griddata(np.array(np.where(~mask)).T, sza[~mask], \
+                       (np.repeat(range(23), 23).reshape(23,23), \
+                        np.tile  (range(23), 23).reshape(23,23)), method='nearest')
+        mask = np.isnan(saa) 
+        saa  = griddata(np.array(np.where(~mask)).T, saa[~mask], \
+                       (np.repeat(range(23), 23).reshape(23,23), \
+                        np.tile  (range(23), 23).reshape(23,23)), method='nearest') 
+
+	self.saa, self.sza = np.array(saa), np.array(sza)
 	dete_id = np.unique([i[1] for i in vaa.keys()])
 	band_id = range(13)
 	bands_vaa = []
@@ -203,10 +215,18 @@ class read_s2(object):
 	self.vza = {}; self.vaa = {}
 	self.mvz = {}; self.mva = {}
 	for band in bands:
-	    self.vza[band] = vza[band]
-	    self.vaa[band] = vaa[band]
-	    self.mvz[band] = mvz_[band]
-	    self.mva[band] = mva_[band]
+            mask  = np.isnan(vza[band])
+            g_vza = griddata(np.array(np.where(~mask)).T, vza[band][~mask], \
+                            (np.repeat(range(23), 23).reshape(23,23), \
+                             np.tile  (range(23), 23).reshape(23,23)), method='nearest')
+            mask  = np.isnan(vaa[band])              
+            g_vaa = griddata(np.array(np.where(~mask)).T, vaa[band][~mask], \
+                            (np.repeat(range(23), 23).reshape(23,23), \
+                             np.tile  (range(23), 23).reshape(23,23)), method='nearest') 
+	    self.vza[band]  = g_vza
+	    self.vaa[band]  = g_vaa
+	    self.mvz[band]  = mvz_[band]
+	    self.mva[band]  = mva_[band]
 	self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
                        'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
 

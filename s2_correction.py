@@ -26,7 +26,9 @@ class atmospheric_correction(object):
                  s2_tile,
                  s2_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/s_data/',
                  global_dem  = '/home/ucfafyi/DATA/Multiply/eles/global_dem.vrt',
-                 emus_dir    = '/home/ucfafyi/DATA/Multiply/emus/'):              
+                 emus_dir    = '/home/ucfafyi/DATA/Multiply/emus/',
+                 reconstruct_s2_angle = False
+                 ):              
         
         self.year        = year
         self.month       = month
@@ -36,7 +38,7 @@ class atmospheric_correction(object):
         self.global_dem  = global_dem
         self.emus_dir    = emus_dir
         self.sur_refs     = {}
-
+        self.reconstruct_s2_angle = reconstruct_s2_angle
 	self.logger = logging.getLogger('Sentinel 2 Atmospheric Correction')
 	self.logger.setLevel(logging.INFO)
         if not self.logger.handlers:       
@@ -70,17 +72,27 @@ class atmospheric_correction(object):
         self.logger.info('Reading in the reflectance.')
         all_refs = self.s2.get_s2_toa()
         self.logger.info('Reading in the angles')
-        self.s2.get_s2_angles()
+        self.s2.get_s2_angles(self.reconstruct_s2_angle)
         all_angs = self.s2.angles
         self.sza,self.saa = all_angs['sza'], all_angs['saa']
         
         self.logger.info('Doing 10 meter bands')
         self._10meter_ref = np.array([all_refs[band]/10000. for band \
                                       in ['B02', 'B03', 'B04', 'B08']])
-        self._10meter_vza = np.array([all_angs['vza'][band]/100. for band
-                                      in ['B02', 'B03', 'B04', 'B08']])
-        self._10meter_vaa = np.array([all_angs['vaa'][band]/100. for band
-                                      in ['B02', 'B03', 'B04', 'B08']])
+        if self.reconstruct_s2_angle:
+            self._10meter_vza = np.array([all_angs['vza'][band]/100. for band
+                                          in ['B02', 'B03', 'B04', 'B08']])
+            self._10meter_vaa = np.array([all_angs['vaa'][band]/100. for band
+                                          in ['B02', 'B03', 'B04', 'B08']])
+        else:
+            self._10meter_vza = np.array([np.repeat(np.repeat(all_angs['vza'][band], int(np.ceil(10980/23.)), \
+                                          axis=0), int(np.ceil(10980/23.)), axis=1)[:10980, :10980]\
+                                          for band in ['B02', 'B03', 'B04', 'B08']])
+
+            self._10meter_vaa = np.array([np.repeat(np.repeat(all_angs['vaa'][band], int(np.ceil(10980/23.)), \
+                                          axis=0), int(np.ceil(10980/23.)), axis=1)[:10980, :10980]\
+                                          for band in ['B02', 'B03', 'B04', 'B08']])
+
         self._10meter_sza = np.repeat(np.repeat(self.sza, int(np.ceil(10980/23.)), \
                                       axis=0), int(np.ceil(10980/23.)), axis=1)[:10980, :10980]
         self._10meter_saa = np.repeat(np.repeat(self.saa, int(np.ceil(10980/23.)), \
@@ -114,10 +126,25 @@ class atmospheric_correction(object):
         self.logger.info('Doing 20 meter bands')
         self._20meter_ref = np.array([all_refs[band]/10000. for band \
                                       in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
-        self._20meter_vza = np.array([all_angs['vza'][band]/100. for band
-                                      in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
-        self._20meter_vaa = np.array([all_angs['vaa'][band]/100. for band
-                                      in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
+
+        if self.reconstruct_s2_angle:
+            self._20meter_vza = np.array([all_angs['vza'][band]/100. for band \
+                                          in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
+            self._20meter_vaa = np.array([all_angs['vaa'][band]/100. for band \
+                                          in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
+        else:
+            self._20meter_vza = np.array([np.repeat(np.repeat(all_angs['vza'][band], \
+                                          int(np.ceil(5490/23.)), axis=0), int(np.ceil(5490/23.)), \
+                                          axis=1)[:5490, :5490] for band in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
+            self._20meter_vaa = np.array([np.repeat(np.repeat(all_angs['vaa'][band], \
+                                          int(np.ceil(5490/23.)), axis=0), int(np.ceil(5490/23.)), \
+                                          axis=1)[:5490, :5490] for band in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
+
+
+        #self._20meter_vza = np.array([all_angs['vza'][band]/100. for band
+        #                              in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
+        #self._20meter_vaa = np.array([all_angs['vaa'][band]/100. for band
+        #                              in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
         self._20meter_sza = np.repeat(np.repeat(self.sza, int(np.ceil(5490/23.)), \
                                       axis=0), int(np.ceil(5490/23.)), axis=1)[:5490, :5490]
         self._20meter_saa = np.repeat(np.repeat(self.saa, int(np.ceil(5490/23.)), \
@@ -150,10 +177,23 @@ class atmospheric_correction(object):
         self.logger.info('Doing 60 meter bands')
         self._60meter_ref = np.array([all_refs[band]/10000. for band \
                                       in ['B01', 'B09', 'B10']])
-        self._60meter_vza = np.array([all_angs['vza'][band]/100. for band
-                                      in ['B01', 'B09', 'B10']])
-        self._60meter_vaa = np.array([all_angs['vaa'][band]/100. for band
-                                      in ['B01', 'B09', 'B10']])
+        if self.reconstruct_s2_angle:
+            self._60meter_vza = np.array([all_angs['vza'][band]/100. for band \
+                                          in ['B01', 'B09', 'B10']])
+            self._60meter_vaa = np.array([all_angs['vaa'][band]/100. for band \
+                                          in ['B01', 'B09', 'B10']])
+        else:
+            self._60meter_vza = np.array([np.repeat(np.repeat(all_angs['vza'][band], int(np.ceil(1830/23.)), \
+                                          axis=0), int(np.ceil(1830/23.)), axis=1)[:1830, :1830] \
+                                          for band in ['B01', 'B09', 'B10']])
+
+            self._60meter_vaa = np.array([np.repeat(np.repeat(all_angs['vaa'][band], int(np.ceil(1830/23.)), \
+                                          axis=0), int(np.ceil(1830/23.)), axis=1)[:1830, :1830] \
+                                          for band in ['B01', 'B09', 'B10']])
+        #self._60meter_vza = np.array([all_angs['vza'][band]/100. for band
+        #                              in ['B01', 'B09', 'B10']])
+        #self._60meter_vaa = np.array([all_angs['vaa'][band]/100. for band
+        #                              in ['B01', 'B09', 'B10']])
         self._60meter_sza = np.repeat(np.repeat(self.sza, int(np.ceil(1830/23.)), \
                                       axis=0), int(np.ceil(1830/23.)), axis=1)[:1830, :1830]
         self._60meter_saa = np.repeat(np.repeat(self.saa, int(np.ceil(1830/23.)), \

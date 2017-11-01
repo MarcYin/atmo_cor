@@ -196,8 +196,7 @@ class solve_aerosol(object):
         tcwv            = tcwv / 10. 
 
         self.s2_tco3_unc   = np.ones(self.s2_tco3.shape)   * 0.2
-        self.s2_aod550_unc = np.ones(self.s2_aod550.shape) * 1.0
-
+        self.s2_aod550_unc = np.ones(self.s2_aod550.shape) * 0.5
         self.s2_logger.info('Trying to get the tcwv from the emulation of sen2cor look up table.')
         try:
             b8a, b9  = np.repeat(np.repeat(selected_img['B8A']*0.0001, 2, axis=0), 2, axis=1)[self.Hx, self.Hy],\
@@ -287,6 +286,13 @@ class solve_aerosol(object):
                     np.all(self.s2_toa < 1, axis = 0)
         self.s2_mask = boa_mask & toa_mask & qua_mask & (~self.elevation.mask)
         self.s2_AEE, self.s2_bounds = self._load_emus(self.s2_sensor)
+
+    def _load_xa_xb_xc_emus(self,):
+        xap_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xap.pkl'%(self.s2_sensor))[0]
+        xbp_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xbp.pkl'%(self.s2_sensor))[0]
+        xcp_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xcp.pkl'%(self.s2_sensor))[0]
+        f = lambda em: pkl.load(open(em, 'rb'))
+        self.xap_emus, self.xbp_emus, self.xcp_emus = parmap(f, [xap_emu, xbp_emu, xcp_emu])
 
     def _read_cams(self, example_file, parameters = ['aod550', 'tcwv', 'gtco3']):
 	netcdf_file = datetime.datetime(self.sen_time.year, self.sen_time.month, \

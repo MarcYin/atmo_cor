@@ -216,7 +216,7 @@ class solving_atmo_paras(object):
         #for _aod in np.arange(max(p0[0]-self.aot_unc, 0), min(p0[0]+self.aot_unc, 2), 0.1):
         #    p          = (_aod,) + self.prior[1:]   
         #    self.prior = p
-        psolve = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint = 1, \
+        psolve = optimize.fmin_l_bfgs_b(self.fmin_l_bfgs_cost, p0, approx_grad=0, iprint = 100, \
                                         pgtol=1e-6,factr=1000, bounds=self.bounds,fprime=None)
         #psolve2 = optimize.fmin(self.fmin_cost, p0, full_output=True, maxiter=100, maxfun=150, disp=0)
         return psolve#, psolve2

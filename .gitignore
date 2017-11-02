@@ -1,4 +1,5 @@
 *.pyc
+*.out
 *.swp
 .data/
 *.hdf

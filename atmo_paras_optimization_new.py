@@ -6,56 +6,86 @@ from glob import glob
 import cPickle as pkl
 from multi_process import parmap
 
-class ddv(object):
+class solving_atmo_paras(object): 
     '''
     A simple implementation of dark dense vegitation method for the restieval of prior aod.
     '''
     def __init__(self,
-                 blue, red,
-                 nir, swif,
-                 sensor,
-                 sza, vza, raa,
+                 boa, toa,
+                 sza, vza,
+                 saa, vaa,
+                 aod_prior,
+                 tcwv_prior,
+                 tco3_prior,
                  elevation,
-                 tcwv, tco3,
-                 red_emus   = None, 
-                 blue_emus  = None,
-                 band_index = [1, 3],
-                 block_size = 10980,
-                 emus_dir   = '/home/ucfafyi/DATA/Multiply/emus/'
+                 aod_unc,
+                 tcwv_unc,
+                 tco3_unc,
+                 boa_unc,
+                 Hx, Hy,
+                 full_res,
+                 emulators, 
+                 band_indexs,
+                 band_wavelength,
+                 alpha = -1.42
+                 subsample = 1
+                 subsample_start = 0
                  ):
-        self.blue      = blue
-        self.red       = red
-        self.nir       = nir
-        self.swif      = swif
-        self.sensor    = sensor
-        self.sza       = np.cos(sza*np.pi/180.)
-        self.vza       = np.cos(vza*np.pi/180.)
-        self.raa       = np.cos(raa*np.pi/180.)
-        self.ele       = elevation
-        self.tcwv      = tcwv
-        self.tco3      = tco3
-        self.blue_emus = blue_emus
-        self.red_emus  = red_emus
-        self.blue_in   = band_index[0]
-        self.red_in    = band_index[1]
-        self.block_size = block_size
-        self.emus_dir   = emus_dir
-    def _load_xa_xb_xc_emus(self,):
-        if self.blue_emus is None:
-            xap_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xap.pkl'%(self.sensor))[0]
-            xbp_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xbp.pkl'%(self.sensor))[0]
-            xcp_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xcp.pkl'%(self.sensor))[0]
-            f = lambda em: pkl.load(open(em, 'rb'))
-            self.xap_emus, self.xbp_emus, self.xcp_emus = parmap(f, [xap_emu, xbp_emu, xcp_emu])
-            self.blue_xap_emu, self.blue_xbp_emu, self.blue_xcp_emu = self.xap_emus[self.blue_in], \
-                                                                      self.xbp_emus[self.blue_in], self.xcp_emus[self.blue_in]
-            self.red_xap_emu,  self.red_xbp_emu,  self.red_xcp_emu  = self.xap_emus[self.red_in],  \
-                                                                      self.xbp_emus[self.red_in],  self.xcp_emus[self.red_in]
-        else:
-            self.blue_xap_emu, self.blue_xbp_emu, self.blue_xcp_emu = self.blue_emus
-            self.red_xap_emu,  self.red_xbp_emu,  self.red_xcp_emu  = self.red_emus
-
+        
+        self.boa             = boa
+        self.toa             = toa
+        self.sza             = np.cos(sza*np.pi/180.)
+        self.vza             = np.cos(vza*np.pi/180.)
+        self.saa             = np.cos(saa*np.pi/180.)
+        self.vaa             = np.cos(vaa*np.pi/180.)
+        self.raa             = np.cos((self.saa - self.vaa)*np.pi/180.)
+        self.aod_prior       = aod_prior
+        self.tcwv_prior      = self.tcwv_prior
+        self.tco3_prior      = self.tco3_prior
+        self.ele             = elevation
+        self.aod_unc         = aod_unc
+        self.tcwv_unc        = tcwv_unc
+        self.tco3_unc        = tco3_unc
+        self.boa_unc         = boa_unc
+        self.Hx, self.Hy     = Hx, Hy
+        self.full_res        = full_res
+        self.emus            = emulators
+        self.band_indexs     = band_indexs
+        self.alpha           = alpha
+        self.band_weights    = (np.array(self.band_wavelength)/1000.)**self.alpha
+        self.band_weights    = self.band_weights / self.band_weights.sum() 
+        self.subsample       = subsample
+        self.subsample_start = subsample_start
+ 
+    def _pre_process(self,):
+        try:
+            zero_aod  = np.zeros_loke(self.sza)
+            zero_tcwv = np.zeros_loke(self.sza)
+            zero_tco3 = np.zeros_loke(self.sza)
+            self.control_variables = np.zeros((self.boa.shape[0], 7) + self.vza.shape)
+            if self.vza.ndim == 2:
+                self.control_variables[:] = np.array([self.sza, self.vza, self.raa, zero_aod, zero_tcwv, zero_tco3, self.ele])
+            elif self.vza.ndim == 3:
+                assert self.vza.shape[0] == self.boa.shape[0], 'Each band should have corresponding angles.'
+                for i in range(len(self.vza)):
+                    self.control_variables[i] = np.array([self.sza, self.vza[i], self.raa[i], zero_aod, zero_tcwv, zero_tco3, self.ele])
+            else:
+                raise IOError('Angles should be a 2D array.')
+        except:
+            raise IOError('Check the shape of input angles and elevation.') 
+       
+        try:
+            self.uncs = np.array([self.aod_unc, self.tcwv_unc, self.tco3_unc, self.boa_unc])
+        except:
+            raise IOError('Check the shape of input uncertainties.')
+        self.resample_hx = (1. * self.Hx / self.full_res[0] * self.vza.shape[0]).astype(int)
+        self.resample_hy = (1. * self.Hy / self.full_res[1] * self.vza.shape[1]).astype(int)
+        self.xap_emus    = self.emus[0][self.band_indexs]
+        self.xbp_emus    = self.emus[1][self.band_indexs]
+        self.xcp_emus    = self.emus[2][self.band_indexs]
+        self.uncs        = self.uncs[:, self.resample_hx, self.resample_hx]
     def _ddv_prior(self,):
+        
         self._load_xa_xb_xc_emus()
         ndvi = (self.nir - self.red)/(self.nir + self.red)
         ndvi_mask = (ndvi > 0.6) & (self.swif > 0.01) & (self.swif < 0.25)
@@ -107,32 +137,44 @@ class ddv(object):
         resampled_parameter = parameter[resample_x, resample_y].reshape(self.num_blocks, self.num_blocks)
         return resampled_parameter
 
-    def _bos_cost(self, aod):
-        self.blue_resampled_parameters[3] = aod
-        self.red_resampled_parameters[3]  = aod
+    def _bos_cost(self, p, is_full = True):
 
-        blue_xap, blue_xbp, blue_xcp      = self.blue_xap_emu.predict(self.blue_resampled_parameters.T)[0]\
-                                            .reshape(self.num_blocks, self.num_blocks)[self.resample_hx, self.resample_hy],\
-                                            self.blue_xbp_emu.predict(self.blue_resampled_parameters.T)[0]\
-                                            .reshape(self.num_blocks, self.num_blocks)[self.resample_hx, self.resample_hy],\
-                                            self.blue_xcp_emu.predict(self.blue_resampled_parameters.T)[0]\
-                                            .reshape(self.num_blocks, self.num_blocks)[self.resample_hx, self.resample_hy]
+        X             = self.control_variables.reshape(self.boa.shape[0], 7, -1)
+        X[:, 3:6, :]  = np.array(p)
+        xap_H,  xbp_H,  xcp_H  = [], [], []
+        xap_dH, xbp_dH, xcp_dH = [], [], []
+          
+        for i in range(len(self.xap_emus)):
+            H, dH   = self.xap_emus[i].predict(X[i].T, do_unc=False) 
+            H, dH   = np.array(H).reshape(*self.sza.shape), np.array(dH)[:,3:6].reshape(*self.sza.shape, 3)
+            xap_H. append(H [self.resample_hx,self.resample_hy])
+            xap_dH.append(dH[self.resample_hx,self.resample_hy,:])
 
-        red_xap, red_xbp, red_xcp         = self.red_xap_emu.predict(self.red_resampled_parameters.T)[0]\
-                                            .reshape(self.num_blocks, self.num_blocks)[self.resample_hx, self.resample_hy],\
-                                            self.red_xbp_emu.predict(self.red_resampled_parameters.T)[0]\
-                                            .reshape(self.num_blocks, self.num_blocks)[self.resample_hx, self.resample_hy],\
-                                            self.red_xcp_emu.predict(self.red_resampled_parameters.T)[0]\
-                                            .reshape(self.num_blocks, self.num_blocks)[self.resample_hx, self.resample_hy] 
-       
-        y        = blue_xap * self.blue[self._ndvi_mask] - blue_xbp
-        blue_sur = y / (1 + blue_xcp * y) 
-        y        = red_xap * self.red[self._ndvi_mask] - red_xbp
-        red_sur  = y / (1 + red_xcp * y)
-        blue_dif = (blue_sur - 0.25 * self.swif[self._ndvi_mask])**2
-        red_dif  = (blue_sur - 0.5  * self.swif[self._ndvi_mask])**2
-        cost     = 0.5 * (blue_dif + red_dif)
-        return cost
+            H, dH   = self.xbp_emus[i].predict(X[i].T, do_unc=False) 
+            H, dH   = np.array(H).reshape(*self.sza.shape), np.array(dH)[:,3:6].reshape(*self.sza.shape, 3)
+            xbp_H. append(H [self.resample_hx,self.resample_hy])
+            xbp_dH.append(dH[self.resample_hx,self.resample_hy,:])
+
+            H, dH   = self.xcp_emus[i].predict(X[i].T, do_unc=False) 
+            H, dH   = np.array(H).reshape(*self.sza.shape), np.array(dH)[:,3:6].reshape(*self.sza.shape, 3)
+            xcp_H. append(H [self.resample_hx,self.resample_hy])
+            xcp_dH.append(dH[self.resample_hx,self.resample_hy,:])
+
+        xap_H,  xbp_H,  xcp_H  = np.array(xap_H),    np.array(xbp_H),    np.array(xcp_H)
+        xap_dH, xbp_dH, xcp_dH = np.array(xap_dH), np.array(xbp_dH), np.array(xcp_dH)
+        
+        y        = xap_H * self.toa - xbp_H
+        sur_ref  = y / (1 + xcp_H * y) 
+        diff     = sur_ref - self.boa
+        J        = (0.5 * self.band_weights[...,None] * (diff)**2 / self.uncs[3]).sum()
+        dH       = (-self.toa[...,None] * xap_dH + xcp_dH (xbp_H - xap_H * self.toa[...,None])**2 + \
+                    xbp_dH) /(self.toa[...,None] * xap_H * xcp_H - xbp_H * xcp_H + 1)**2
+        full_dJ  = [ self.band_weights[...,None] * dH[:,:,i] * diff / (self.uncs[3]**2) for i in range(3)]
+        if is_full:
+            J_ = np.array(full_dJ).sum(axis=(1,))
+        else:
+            J_ = np.array(full_dJ).sum(axis=(1, 2))
+        return J, J_
          
     def _smooth_cost(self, aod):
         aod   = aod.reshape(self.num_blocks, self.num_blocks)

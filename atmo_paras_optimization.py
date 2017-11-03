@@ -24,7 +24,6 @@ class solving_atmo_paras(object):
                        atmosphere = None, 
                        subsample  = None,
                        subsample_start = 0,
-                       gradient_refl=True, 
                        bands=None):
         
         self.alpha         = -1.42 #angstrom exponent for continental type aerosols

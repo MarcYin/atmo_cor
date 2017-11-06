@@ -365,6 +365,7 @@ class solve_aerosol(object):
         self.s2_logger.propagate = False
 
         self.s2_sensor = 'MSI'
+        self.s2_logger.info('Doing Sentinel 2 tile: %s on %d-%02d-%02d.'%(self.s2_tile, self.year, self.month, self.day))
         self._s2_aerosol()
         self.s2_solved = []
         if self.aero_res < 500:

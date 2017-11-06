@@ -1,5 +1,6 @@
 *.pyc
 *.out
+*.sh
 *.swp
 .data/
 *.hdf

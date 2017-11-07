@@ -1,6 +1,6 @@
 *.pyc
 *.out
-*.txt
+*.temp
 *.ipynb
 *.sh
 *.swp

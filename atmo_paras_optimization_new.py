@@ -161,8 +161,8 @@ class solving_atmo_paras(object):
         sur_ref  = y / (1 + xcp_H * y) 
         diff     = sur_ref - self.boa
         J        = (0.5 * self.band_weights[...,None] * (diff)**2 / self.boa_unc**2).sum()
-        dH       = (-self.toa[...,None] * xap_dH + xcp_dH * (xbp_H[...,None] - xap_H[...,None] * self.toa[...,None])**2 + \
-                    xbp_dH) /(self.toa[...,None] * xap_H[...,None] * xcp_H[...,None] - xbp_H[...,None] * xcp_H[...,None] + 1)**2
+        dH       = -1 * (-self.toa[...,None] * xap_dH + xcp_dH * (xbp_H[...,None] - xap_H[...,None] * self.toa[...,None])**2 + \
+                         xbp_dH) /(self.toa[...,None] * xap_H[...,None] * xcp_H[...,None] - xbp_H[...,None] * xcp_H[...,None] + 1)**2
         full_dJ  = [ self.band_weights[...,None] * dH[:,:,i] * diff / (self.boa_unc**2) for i in range(3)]
         
         if is_full:
@@ -214,6 +214,7 @@ class solving_atmo_paras(object):
         return J, J_
         
     def _optimization(self,):
+        self._pre_process()
         p0  = self.priors
         bot = np.zeros_like(p0)
         up  = np.zeros_like(p0)
@@ -285,21 +286,4 @@ if __name__ == '__main__':
                               emus,
                               band_indexs,
                               band_wavelength)
-    aero._pre_process()
-    aero._optimization()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    solved = aero._optimization()

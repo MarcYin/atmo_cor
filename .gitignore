@@ -1,5 +1,7 @@
 *.pyc
 *.out
+*.txt
+*.ipynb
 *.sh
 *.swp
 .data/

@@ -58,8 +58,10 @@ class solve_aerosol(object):
         self.s2_tile     = s2_tile
         self.s2_psf      = s2_psf 
         self.s2_u_bands  = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A', 'B09' #bands used for the atmo-cor
+        band_indexs      = [1, 2, 3, 7, 11, 12]
+        self.boa_bands   = [469, 555, 645, 869, 1640, 2130]
         self.s2_full_res = (10980, 10980)
-        self.s_subsample = 1
+        #self.s_subsample = 1
         self.aero_res    = aero_res
         self.mcd43_tmp   = '%s/MCD43A1.A%d%03d.%s.006.*.hdf'
 
@@ -269,8 +271,9 @@ class solve_aerosol(object):
         
         self.Hx, self.Hy = self.Hx[shifted_mask]+int(xs), self.Hy[shifted_mask]+int(ys)
         #self.Lx, self.Ly = self.Lx[shifted_mask], self.Ly[shifted_mask]
-        self.s2_boa      = self.s2_boa[:,shifted_mask]
+        self.s2_boa      = self.s2_boa   [:, shifted_mask]
         self.s2_boa_qa   = self.s2_boa_qa[:, shifted_mask]
+        self.brdf_stds   = self.brdf_stds[:, shifted_mask]
 
         self.s2_logger.info('Getting the convolved TOA reflectance.')
         self.valid_pixs = sum(shifted_mask) # count how many pixels is still within the s2 tile 
@@ -307,7 +310,15 @@ class solve_aerosol(object):
         toa_mask = (~self.bad_pixs) &\
                     np.all(self.s2_toa > 0, axis = 0) &\
                     np.all(self.s2_toa < 1, axis = 0)
-        self.s2_mask = boa_mask & toa_mask & qua_mask 
+
+        self.s2_mask    = boa_mask & toa_mask & qua_mask 
+        self.Hx         = self.Hx          [self.s2_mask]
+        self.Hy         = self.Hy          [self.s2_mask]
+        self.s2_toa     = self.s2_toa   [:, self.s2_mask]
+        self.s2_boa     = self.s2_boa   [:, self.s2_mask]
+        self.s2_boa_qa  = self.s2_boa_qa[:, self.s2_mask]
+        self.brdf_stds  = self.brdf_stds[:, self.s2_mask]
+        self.s2_boa_unc = grab_uncertainty(self.s2_boa, self.boa_bands, self.s2_boa_qa, self.brdf_stds).get_boa_unc()
 
     def _read_cams(self, example_file, parameters = ['aod550', 'tcwv', 'gtco3']):
 	netcdf_file = datetime.datetime(self.sen_time.year, self.sen_time.month, \

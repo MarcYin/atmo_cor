@@ -162,7 +162,7 @@ class solving_atmo_paras(object):
         flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, [sza, vza, saa, vaa, elevation] = self._sort_emus_inputs()
         for i in [flat_mask, flat_boa, flat_toa, flat_boa_unc, flat_atmos, sza, vza, saa, vaa, elevation]:
             if np.array(i).size == 0:
-                return 0., np.array([0.,0.,0.]) # any empty array result in earlier leaving the estimation
+                return 0., np.array(self.flat_prior) # any empty array result in earlier leaving the estimation
         H0, dH = self.AEE.emulator_reflectance_atmosphere(flat_boa, flat_atmos, sza, vza, saa, vaa, elevation, bands=self.band_indexs)
         H0, dH = np.array(H0), np.array(dH)
         diff = (H0 - flat_toa) # order is important!

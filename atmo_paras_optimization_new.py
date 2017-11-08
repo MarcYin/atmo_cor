@@ -30,7 +30,7 @@ class solving_atmo_paras(object):
                  emulators, 
                  band_indexs,
                  band_wavelength,
-                 gamma = 1.,
+                 gamma = 10.,
                  alpha = -1.42,
                  subsample = 1,
                  subsample_start = 0
@@ -203,14 +203,15 @@ class solving_atmo_paras(object):
     def _cost(self, p):
         print '-------------------------------------------------------------------------------'
         print np.array(p).reshape(3, -1)
-        print '-------------------------------------------------------------------------------'
         obs_J, obs_J_       = self._obs_cost(p)
+        
         prior_J, prior_J_   = self._prior_cost(p)
         smooth_J, smooth_J_ = self._smooth_cost(p)
 
-        J = obs_J + prior_J + smooth_J
-        J_ = (obs_J_ +  prior_J_ + smooth_J_).ravel()
-
+        J = obs_J/36. + prior_J + smooth_J
+        J_ = (obs_J_/36. +  prior_J_ + smooth_J_).ravel()
+        print 'costs: ', obs_J/36., prior_J, smooth_J 
+        print '-------------------------------------------------------------------------------'
         return J, J_
         
     def _optimization(self,):
@@ -224,8 +225,8 @@ class solving_atmo_paras(object):
         bot = bot.ravel()
         up  = up.ravel()
         bounds  = np.array([bot, up]).T 
-        psolve = optimize.fmin_l_bfgs_b(self._cost, p0, approx_grad = 0, iprint = 1,\
-                                        pgtol = 1e-4,factr=1000, bounds = bounds,fprime=None)
+        psolve = optimize.fmin_l_bfgs_b(self._cost, p0, approx_grad = 0, iprint = 100,maxiter=100,\
+                                        pgtol = 1e-2,factr=100000, bounds = bounds,fprime=None)
         return psolve
 
 if __name__ == '__main__':

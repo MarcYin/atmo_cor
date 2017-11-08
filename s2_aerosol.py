@@ -119,11 +119,11 @@ class solve_aerosol(object):
         self.s2_logger.info('Find corresponding pixels between S2 and MODIS tiles')
         tiles = Find_corresponding_pixels(self.s2.s2_file_dir+'/B04.jp2', destination_res=500) 
         if len(tiles.keys())>1:
-            self.logger.info('This sentinel 2 tile covers %d MODIS tile.'%len(tiles.keys()))
+            self.s2_logger.info('This sentinel 2 tile covers %d MODIS tile.'%len(tiles.keys()))
         self.mcd43_files = []
         szas, vzas, saas, vaas, raas          = [], [], [], [], []
         boas, boa_qas, brdf_stds, Hxs, Hys    = [], [], [], [], []
-        for key in tiles.keys():
+        for key in tiles.keys()[1:]:
             #h,v = int(key[1:3]), int(key[-2:])
             self.s2_logger.info('Getting BOA from MODIS tile: %s.'%key)
             mcd43_file  = glob(self.mcd43_tmp%(self.mcd43_dir, self.year, self.doy, key))[0]
@@ -392,6 +392,9 @@ class solve_aerosol(object):
         aod_map [inds[:,0], inds[:,1]] = rets[:,0]
         tcwv_map[inds[:,0], inds[:,1]] = rets[:,1]
         tco3_map[inds[:,0], inds[:,1]] = rets[:,2]
+        aod_map, tcwv_map, tco3_map    = np.where(~np.isnan(aod_map),  aod_map,  np.nanmean(aod_map)), \
+                                         np.where(~np.isnan(tcwv_map), tcwv_map, np.nanmean(tcwv_map)), \
+                                         np.where(~np.isnan(tco3_map), tco3_map, np.nanmean(tco3_map))
         para_names = 'aod550', 'tcwv', 'tco3'
          
         g = gdal.Open(self.s2.s2_file_dir+'/B04.jp2')

@@ -236,7 +236,7 @@ class read_s2(object):
             else:
                 print 'Reconstructing Sentinel 2 angles...'
                 subprocess.call(['python', './python/s2a_angle_bands_mod.py', \
-                                  self.s2_file_dir+'/metadata.xml',  '1'])
+                                  self.s2_file_dir+'/metadata.xml',  '10'])
 
 	    if self.bands is None:
 		bands = self.s2_bands
@@ -247,28 +247,22 @@ class read_s2(object):
             fname = [self.s2_file_dir+'/angles/VAA_VZA_%s.img'%band for band in bands]
             pool = Pool(processes=len(fname))
             ret = pool.map(read_s2_band, fname)
+
             for i,angs in enumerate(ret):
+                angs[0][angs[0]<0] = 360 + angs[0][angs[0]<0]
+                if angs.shape != (2, 10980, 10980):
+                    repeats = 10980 / angs.shape[0]
+                    angs    = np.repeat(np.repeat(angs.astype(float)/100., repeats, axis = 1), repeats, axis = 2)
+                else:
+                    angs    = angs.astype(float)/100.
+
                 if slic is None:
                     self.vaa[bands[i]] = angs[0]
                     self.vza[bands[i]] = angs[1]
                 else:
-                    resolution_ratio = angs[0].shape[0]/10980
-                    x_ind, y_ind = (np.array(slic)*resolution_ratio).astype(int)
+                    x_ind, y_ind = np.array(slic)
                     self.vaa[bands[i]] = angs[0][x_ind, y_ind]
                     self.vza[bands[i]] = angs[1][x_ind, y_ind]
-            '''
-	    for band in bands:
-		g = gdal.Open(self.s2_file_dir + '/angles/VAA_VZA_%s.img'%band)
-                VAA, VZA = g.GetRasterBand(1).ReadAsArray(), g.GetRasterBand(2).ReadAsArray()
-                if slic is None:
-                    self.vaa[band] = VAA 
-                    self.vza[band] = VZA
-                else:
-                    resolution_ratio = VAA.shape[0]/10980
-                    x_ind, y_ind = (np.array(slic)*resolution_ratio).astype(int)
-                    self.vaa[band] = VAA[x_ind, y_ind]
-                    self.vza[band] = VZA[x_ind, y_ind]
-            '''  
             self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
                            'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
 

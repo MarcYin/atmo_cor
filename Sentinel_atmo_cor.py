@@ -1,6 +1,6 @@
 #/usr/bin/env python
 import sys
-from s2_aerosol import solve_aerosol
+from s2_aerosol_new import solve_aerosol
 from s2_correction import atmospheric_correction
 file_path = sys.argv[1]
 s2_toa_dir = '/'.join(file_path.split('/')[:-8])
@@ -11,7 +11,7 @@ s2_tile = ''.join(file_path.split('/')[-8:-5])
 aero = solve_aerosol(year, month, day, \
                      s2_toa_dir = s2_toa_dir,
                      mcd43_dir  = '/home/ucfafyi/DATA/S2_MODIS/m_data/', \
-                     emus_dir   = '/home/ucfafyi/DATA/Multiply/', s2_tile=s2_tile, s2_psf=None)
+                     emus_dir   = '/home/ucfafyi/DATA/Multiply/emus/', s2_tile=s2_tile, s2_psf=None)
 aero.solving_s2_aerosol()
 atm = atmospheric_correction(year, month, day, s2_tile, s2_toa_dir  = s2_toa_dir)
 atm.atmospheric_correction()  

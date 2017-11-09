@@ -52,10 +52,6 @@ class solve_aerosol(object):
         self.day         = day
         self.date        = datetime.datetime(self.year, self.month, self.day)
         self.doy         = self.date.timetuple().tm_yday
-        #self.date        = datetime.datetime(self.year, 1, 1) \
-        #                                     + datetime.timedelta(self.doy - 1)
-        #self.h           = h
-        #self.v           = v
         self.mcd43_dir   = mcd43_dir
         self.emus_dir    = emus_dir
         self.qa_thresh   = qa_thresh
@@ -139,8 +135,13 @@ class solve_aerosol(object):
 		self.s2_angles = np.zeros((4, 6, len(Hx)))
 		hx, hy = (Hx*23/10980.).astype(int), (Hy*23/10980.).astype(int) # index the 23*23 sun angles
 		for j, band in enumerate (self.s2_u_bands[:-2]):
-		    self.s2_angles[[0,2],j,:] = self.s2.angles['vza'][band]/100.,  self.s2.angles['vaa'][band]/100. 
-		    self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy],self.s2.angles['saa'][hx, hy]
+                    vhx, vhy = (1.*Hx*self.s2.angles['vza'][band].shape[0]/self.full_res[0]).astype(int), \
+                               (1.*Hy*self.s2.angles['vza'][band].shape[1]/self.full_res[1]).astype(int)
+                    self.s2_angles[[0,2],j,:] = (self.s2.angles['vza'][band].astype(float)/100.)[vhx, vhy], \
+                                                (self.s2.angles['vaa'][band].astype(float)/100.)[vhx, vhy]
+
+		    self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy], \
+                                                self.s2.angles['saa'][hx, hy]
 
 	    else:
 		self.s2_angles = np.zeros((4, 6, len(Hx)))

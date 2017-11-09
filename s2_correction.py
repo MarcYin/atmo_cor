@@ -220,7 +220,8 @@ class atmospheric_correction(object):
         self.sur_refs.update(dict(zip(['B01', 'B09', 'B10'], self.boa)))
         self._save_img(self.boa, ['B01', 'B09', 'B10']); del self.boa
         del all_refs; del self.s2.selected_img; del all_angs; del self.s2.angles
-  
+        self.logger.info('Done!')
+
     def _save_rgb(self, rgb_array, name, source_image):
         g            = gdal.Open(source_image)
         projection   = g.GetProjection()
@@ -257,7 +258,7 @@ class atmospheric_correction(object):
 
     def get_control_variables(self, target_band):
 
-	aod = reproject_data(self.s2.s2_file_dir+'/aod550.tif', \
+	aod = reproject_data(self.s2.s2_file_dir+'/aot.tif', \
                              self.s2.s2_file_dir+'/%s.jp2'%target_band)
         aod.get_it()
 

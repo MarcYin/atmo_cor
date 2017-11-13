@@ -182,11 +182,10 @@ class solve_aerosol(object):
         self.s2_boa = self.s2_boa*np.array(self.s2_spectral_transform)[0,:-1][...,None] + \
                                   np.array(self.s2_spectral_transform)[1,:-1][...,None]
         self.s2_logger.info('Getting elevation.')
-        ele = reproject_data(self.global_dem, self.s2.s2_file_dir+'/B04.jp2')
-        ele.get_it()
-        mask = ~np.isfinite(ele.data)
-        ele.data = np.ma.array(ele.data, mask = mask)
-        self.elevation = ele.data[self.Hx, self.Hy]/1000.
+        ele_data = reproject_data(self.global_dem, self.s2.s2_file_dir+'/B04.jp2').data
+        mask = ~np.isfinite(ele_data)
+        ele_data = np.ma.array(ele_data, mask = mask)
+        self.elevation = ele_data[self.Hx, self.Hy]/1000.
         
         self.s2_logger.info('Getting pripors from ECMWF forcasts.')
 	sen_time_str    = json.load(open(self.s2.s2_file_dir+'/tileInfo.json', 'r'))['timestamp']
@@ -229,7 +228,7 @@ class solve_aerosol(object):
                                  ['gtco3'])).reshape((61, 30, 61, 30)).mean(axis=(3,1)) * 46.698
             _tcwv    = np.zeros((61, 61))
             _tcwv[:] = self.s2_tcwv.mean()
-            _ele = ele.data.reshape((61, 180, 61, 180)).mean(axis=(3,1))/1000.
+            _ele     = ele_data.reshape((61, 180, 61, 180)).mean(axis=(3,1))/1000.
             b2, b4, b8, b12 = selected_img['B02']/10000., selected_img['B04']/10000., \
                               selected_img['B08']/10000., selected_img['B12']/10000.,
             b12 = np.repeat(np.repeat(b12, 2, axis = 1), 2, axis = 0)
@@ -343,9 +342,8 @@ class solve_aerosol(object):
 	    offset  = sub.GetOffset()
 	    scale   = sub.GetScale()
 	    bad_pix = int(sub.GetNoDataValue())
-	    rep     = reproject_data(g, example_file)
-	    rep.get_it()
-	    data    = rep.g.GetRasterBand(ind+1).ReadAsArray()
+	    rep_g   = reproject_data(g, example_file).g
+	    data    = rep_g.GetRasterBand(ind+1).ReadAsArray()
 	    data    = data*scale + offset
 	    mask    = (data == (bad_pix*scale + offset))
 	    if mask.sum()>=1:

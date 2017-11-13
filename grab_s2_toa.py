@@ -10,6 +10,8 @@ from glob import glob
 from cloud import classification
 from scipy.interpolate import griddata
 import subprocess
+from reproject import reproject_data
+from multi_process import parmap
 import copy
 
 def read_s2_band(fname):
@@ -116,7 +118,7 @@ class read_s2(object):
                                            '/cloud.tiff').ReadAsArray().astype(bool)
         self.cloud_cover = 1.*self.cloud.sum()/self.cloud.size
 
-    def get_s2_angles(self,reconstruct = True, slic = None):
+    def get_s2_angles(self, reconstruct = True, slic = None):
 
 
 	tree = ET.parse(self.s2_file_dir+'/metadata.xml')
@@ -245,17 +247,11 @@ class read_s2(object):
 
             self.vaa = {}; self.vza = {}
             fname = [self.s2_file_dir+'/angles/VAA_VZA_%s.img'%band for band in bands]
-            pool = Pool(processes=len(fname))
-            ret = pool.map(read_s2_band, fname)
-
+            f = lambda fn: reproject_data(fn, self.s2_file_dir+'/B04.jp2').data
+            ret = parmap(f, fname)
             for i,angs in enumerate(ret):
                 angs[0][angs[0]<0] = 360 + angs[0][angs[0]<0]
-                if angs.shape != (2, 10980, 10980):
-                    repeats = 10980 / angs.shape[0]
-                    angs    = np.repeat(np.repeat(angs.astype(float)/100., repeats, axis = 1), repeats, axis = 2)
-                else:
-                    angs    = angs.astype(float)/100.
-
+                angs = angs.astype(float)/100.
                 if slic is None:
                     self.vaa[bands[i]] = angs[0]
                     self.vza[bands[i]] = angs[1]
@@ -265,18 +261,6 @@ class read_s2(object):
                     self.vza[bands[i]] = angs[1][x_ind, y_ind]
             self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
                            'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
-
-    def get_wv(self,):
-	fname   = [self.s2_file_dir+'/%s.jp2'%i for i in ['B8A', 'B09']]
-	pool    = Pool(processes=len(fname))
-	b8a, b9 = pool.map(read_s2_band, fname)
-
-        b9  = np.repeat(np.repeat(b9, 3, axis=0), 3, axis=1) # repeat image to match the b8a
-        SOLAR_SPECTRAL_IRRADIANCE_B_8A = 955.19
-        SOLAR_SPECTRAL_IRRADIANCE_B_09 = 813.04	
-        #the same sun earth distance correction factors cancled out
-        CIBR = SOLAR_SPECTRAL_IRRADIANCE_B_8A/SOLAR_SPECTRAL_IRRADIANCE_B_09 * b8a/b9 
-        return CIBR
 
 if __name__ == '__main__':
     

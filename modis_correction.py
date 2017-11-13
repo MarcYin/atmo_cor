@@ -107,26 +107,19 @@ class atmospheric_correction(object):
         
     def get_control_variables(self,):
 
-        aod = reproject_data(self.mod_l1b_dir+'/atmo_paras/' + \
-                             self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_aod550.tif', self.example_file)
-        aod.get_it()
-
+        aod  = reproject_data(self.mod_l1b_dir+'/atmo_paras/' + \
+                             self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_aod550.tif', self.example_file).data
         tcwv = reproject_data(self.mod_l1b_dir+'/atmo_paras/' + \
-                              self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_tcwv.tif', self.example_file)
-        tcwv.get_it()
-
+                              self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_tcwv.tif', self.example_file).data
         tco3 = reproject_data(self.mod_l1b_dir+'/atmo_paras/' +\
-                              self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_tco3.tif', self.example_file)
-        tco3.get_it()
-
-        ele = reproject_data(self.global_dem, self.example_file)
-        ele.get_it()
-        mask = ~np.isfinite(ele.data)
+                              self.example_file.split('/')[-1].split('_EV_')[0]+'_EV_tco3.tif', self.example_file).data
+        ele  = reproject_data(self.global_dem, self.example_file).data
+        mask = ~np.isfinite(ele)
         if mask.sum()>0:
-           ele.data[mask] = np.interp(np.flatnonzero(mask), \
-                                      np.flatnonzero(~mask), ele.data[~mask]) # simple interpolation
+           ele[mask] = np.interp(np.flatnonzero(mask), \
+                                 np.flatnonzero(~mask), ele[~mask]) # simple interpolation
 
-        return aod.data, tcwv.data, tco3.data, ele.data
+        return aod, tcwv, tco3, ele
 
     def _save_img(self, refs, bands):
         g            = gdal.Open(self.example_file)

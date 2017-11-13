@@ -42,7 +42,7 @@ class solve_aerosol(object):
                  s2_psf      = None,
                  qa_thresh   = 255,
                  aero_res    = 3050, # resolution for aerosol retrival in meters should be larger than 500
-                 reconstruct_s2_angle = False):
+                 reconstruct_s2_angle = True):
 
         self.year        = year 
         self.month       = month
@@ -97,7 +97,7 @@ class solve_aerosol(object):
         else:
             return cgaus 
     
-    #def _s2_aerosol(self,):
+    def _s2_aerosol(self,):
         
         self.s2_logger.propagate = False
         self.s2_logger.info('Start to retrieve atmospheric parameters.')
@@ -111,7 +111,7 @@ class solve_aerosol(object):
         self.s2_logger.info('Find corresponding pixels between S2 and MODIS tiles')
         tiles = Find_corresponding_pixels(self.s2.s2_file_dir+'/B04.jp2', destination_res=500) 
         if len(tiles.keys())>1:
-            self.logger.info('This sentinel 2 tile covers %d MODIS tile.'%len(tiles.keys()))
+            self.s2_logger.info('This sentinel 2 tile covers %d MODIS tile.'%len(tiles.keys()))
         self.mcd43_files = []
         boas, boa_qas, brdf_stds, Hxs, Hys    = [], [], [], [], []
         for key in tiles.keys():
@@ -171,8 +171,10 @@ class solve_aerosol(object):
                                   np.array(self.s2_spectral_transform)[1,:-1][...,None]
 	self.Hx  = np.hstack(Hxs)
         self.Hy  = np.hstack(Hys)
-        self.sza = self.s2.angles['sza']
-        self.saa = self.s2.angles['saa']
+        x_resamp = (np.repeat(np.arange(self.num_blocks), self.num_blocks) / self.num_blocks * self.s2.angles['sza'].shape[0]).astype(int)
+        y_resamp = (np.tile  (np.arange(self.num_blocks), self.num_blocks) / self.num_blocks * self.s2.angles['sza'].shape[1]).astype(int)
+        self.sza = self.s2.angles['sza'][x_resamp, y_resamp].reshape(self.num_blocks, self.num_blocks)
+        self.saa = self.s2.angles['saa'][x_resamp, y_resamp].reshape(self.num_blocks, self.num_blocks)
         self.vza = []
         self.vaa = []
         for band in self.s2_u_bands[:-2]:
@@ -190,12 +192,11 @@ class solve_aerosol(object):
         self.raa = self.saa[None, ...] - self.vaa
         self.s2_logger.info('Getting elevation.')
         example_file   = self.s2.s2_file_dir+'/B04.jp2'
-        ele            = reproject_data(self.global_dem, example_file)
-        ele.get_it()
-        mask           = ~np.isfinite(ele.data)
-        ele.data       = np.ma.array(ele.data, mask = mask)
-        self.elevation = ele.data.reshape((self.num_blocks, ele.data.shape[0] / self.num_blocks, \
-                                           self.num_blocks, ele.data.shape[1] / self.num_blocks)).mean(axis=(3,1))/1000.
+        ele_data       = reproject_data(self.global_dem, example_file).data
+        mask           = ~np.isfinite(ele_data)
+        ele_data       = np.ma.array(ele_data, mask = mask)
+        self.elevation = ele_data.reshape((self.num_blocks, ele_data.shape[0] / self.num_blocks, \
+                                           self.num_blocks, ele_data.shape[1] / self.num_blocks)).mean(axis=(3,1))/1000.
 
         self.s2_logger.info('Getting pripors from ECMWF forcasts.')
 	sen_time_str    = json.load(open(self.s2.s2_file_dir+'/tileInfo.json', 'r'))['timestamp']
@@ -250,11 +251,11 @@ class solve_aerosol(object):
         try:
             red_emus  = self.emus[0][3], self.emus[1][3], self.emus[2][3] 
             blue_emus = self.emus[0][1], self.emus[1][1], self.emus[2][1] 
-            sza       = self.s2.angles['sza']
-            blue_vza  = self.s2.angles['vza']['B02'] 
-            red_vza   = self.s2.angles['vza']['B04'] 
-            blue_raa  = self.s2.angles['vaa']['B02'] - self.s2.angles['saa']
-            red_raa   = self.s2.angles['vaa']['B04'] - self.s2.angles['saa']
+            sza       = self.sza
+            blue_vza  = self.vza[0]
+            red_vza   = self.vza[2]
+            blue_raa  = self.vaa[0] - self.saa
+            red_raa   = self.vaa[2] - self.saa
             b2, b4,   = selected_img['B02']/10000., selected_img['B04']/10000.
             b8, b12   = selected_img['B08']/10000., selected_img['B12']/10000.
             b12       = np.repeat(np.repeat(b12, 2, axis = 1), 2, axis = 0)
@@ -379,9 +380,8 @@ class solve_aerosol(object):
 	    offset  = sub.GetOffset()
 	    scale   = sub.GetScale()
 	    bad_pix = int(sub.GetNoDataValue())
-	    rep     = reproject_data(g, example_file)
-	    rep.get_it()
-	    data    = rep.g.GetRasterBand(ind+1).ReadAsArray()
+	    rep_g   = reproject_data(g, example_file).g
+	    data    = rep_g.GetRasterBand(ind+1).ReadAsArray()
 	    data    = data*scale + offset
 	    mask    = (data == (bad_pix*scale + offset))
 	    if mask.sum()>=1:

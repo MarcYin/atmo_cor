@@ -7,6 +7,7 @@ import json
 import datetime
 import logging
 import numpy as np
+from grab_l8_toa import read_l8
 from ddv import ddv
 from glob import glob
 from scipy import signal, ndimage
@@ -18,7 +19,7 @@ from get_brdf import get_brdf_six
 from grab_uncertainty import grab_uncertainty
 from atmo_paras_optimization_new import solving_atmo_paras
 from psf_optimize import psf_optimize
-
+from spatial_mapping import Find_corresponding_pixels
 
 class solve_aerosol(object):
     '''
@@ -53,13 +54,12 @@ class solve_aerosol(object):
         self.cams_dir    = cams_dir
         self.l8_tile     = l8_tile
         self.l8_psf      = l8_psf
-        self.l8_u_bands  = 'band2', 'band3', 'band4', 'band5', 'band6', 'band7' #bands used for the atmo-cor
-        self.band_indexs = [2, 3, 4, 5, 6, 7]
+        self.bands       = [2, 3, 4, 5, 6, 7]
         self.boa_bands   = [469, 555, 645, 869, 1640, 2130]
         self.aero_res    = aero_res
         self.mcd43_tmp   = '%s/MCD43A1.A%d%03d.%s.006.*.hdf'
-        self.l8_spectral_transform = [[ 1.06946607,  1.03048916,  1.04039226,  1.00163932,  1.00010918, 0.95607606,  0.99951677],
-                                      [ 0.0035921 , -0.00142761, -0.00383504, -0.00558762, -0.00570695, 0.00861192,  0.00188871]]
+        self.spectral_transform = [[1.0425211806,      1.03763437575,     1.02046102587,     0.999167480738,  1.00072211685,    0.955317665361  ], 
+                                   [0.000960797104206, -0.00263498369438, -0.00179952807464, 0.0018999624331, -0.0072213121738, 0.00782954328347]] 
     def _load_xa_xb_xc_emus(self,):
         xap_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xap.pkl'%(self.sensor))[0]
         xbp_emu = glob(self.emus_dir + '/isotropic_%s_emulators_*_xbp.pkl'%(self.sensor))[0]
@@ -82,25 +82,27 @@ class solve_aerosol(object):
         else:
             return cgaus
 
-
-    def _s2_aerosol(self,):
+    def _l8_aerosol(self,):
         self.logger.propagate = False
         self.logger.info('Start to retrieve atmospheric parameters.')
-        self.
+        l8 = read_l8(self.l8_toa_dir, self.l8_tile, self.year, self.month, self.day, bands = self.bands)
         self.logger.info('Reading in TOA reflectance.')
-        selected_img = self.s2.get_s2_toa()
-        self.s2.get_s2_cloud()
+        self.toa      = l8._get_toa()
+        self.sza      = l8.sza
+        self.vza      = l8.vza
+        self.saa      = l8.saa
+        self.vaa      = l8.vaa
+        self.sen_time = l8.sen_time
         self.logger.info('Loading emulators.')
         self._load_xa_xb_xc_emus()
-        #self.s2.cloud[:] = False # due to the bad cloud algrithm 
-        self.logger.info('Find corresponding pixels between S2 and MODIS tiles')
-        tiles = Find_corresponding_pixels(self.s2.s2_file_dir+'/B04.jp2', destination_res=500)
+        self.logger.info('Find corresponding pixels between L8 and MODIS tiles')
+        self.example_file = self.l8_toa_dir + '/%s_b%d.tif'%(l8.header, 1)
+        tiles = Find_corresponding_pixels(self.example_file, destination_res=500)
         if len(tiles.keys())>1:
-            self.logger.info('This sentinel 2 tile covers %d MODIS tile.'%len(tiles.keys()))
+            self.logger.info('This Landsat 8 tile covers %d MODIS tile.'%len(tiles.keys()))
         self.mcd43_files = []
         boas, boa_qas, brdf_stds, Hxs, Hys    = [], [], [], [], []
-        for key in tiles.keys():
-            #h,v = int(key[1:3]), int(key[-2:])
+        for key in tiles.keys()[1:]:
             self.logger.info('Getting BOA from MODIS tile: %s.'%key)
             mcd43_file  = glob(self.mcd43_tmp%(self.mcd43_dir, self.year, self.doy, key))[0]
             self.mcd43_files.append(mcd43_file)
@@ -108,51 +110,39 @@ class solve_aerosol(object):
             Lx, Ly = self.L_inds
             Hx, Hy = self.H_inds
             Hxs.append(Hx); Hys.append(Hy)
-            self.logger.info( 'Getting the angles and simulated surface reflectance.')
-            self.s2.get_s2_angles(self.reconstruct_s2_angle)
 
-            if self.reconstruct_s2_angle:
-                self.s2_angles = np.zeros((4, 6, len(Hx)))
-                hx, hy = (Hx*23./self.full_res[0]).astype(int), \
-                         (Hy*23./self.full_res[1]).astype(int) # index the 23*23 sun angles
-                for j, band in enumerate (self.s2_u_bands[:-2]):
-                    vhx, vhy = (1.*Hx*self.s2.angles['vza'][band].shape[0]/self.full_res[0]).astype(int), \
-                               (1.*Hy*self.s2.angles['vza'][band].shape[1]/self.full_res[1]).astype(int)
-                    self.s2_angles[[0,2],j,:] = (self.s2.angles['vza'][band].astype(float)/100.)[vhx, vhy], \
-                                                (self.s2.angles['vaa'][band].astype(float)/100.)[vhx, vhy]
-
-                    self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy], \
-                                                self.s2.angles['saa'][hx, hy]
-            else:
-                self.s2_angles = np.zeros((4, 6, len(Hx)))
-                hx, hy = (Hx*23./self.full_res[0]).astype(int), \
-                         (Hy*23./self.full_res[0]).astype(int) # index the 23*23 sun angles
-                for j, band in enumerate (self.s2_u_bands[:-2]):
-                    self.s2_angles[[0,2],j,:] = self.s2.angles['vza'][band][hx, hy], \
-                                                self.s2.angles['vaa'][band][hx, hy]
-                    self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy], \
-                                                self.s2.angles['saa'][hx, hy]
-
-            #use mean value to fill bad values
-            for i in range(4):
-                mask = ~np.isfinite(self.s2_angles[i])
-                if mask.sum()>0:
-                    self.s2_angles[i][mask] = np.interp(np.flatnonzero(mask), \
-                                                        np.flatnonzero(~mask), \
-                                                        self.s2_angles[i][~mask]) # simple interpolation
-            vza, sza = self.s2_angles[:2]
-            vaa, saa = self.s2_angles[2:]
+            vza, sza = self.vza[:, Hx, Hy], self.sza[:, Hx, Hy]
+            vaa, saa = self.vaa[:, Hx, Hy], self.saa[:, Hx, Hy]
             raa      = vaa - saa
-            # get the simulated surface reflectance
-            s2_boa, s2_boa_qa, brdf_std = get_brdf_six(mcd43_file, angles=[vza, sza, raa],\
-                                                       bands=(3,4,1,2,6,7), Linds= [Lx, Ly])
-            boas.append(s2_boa); boa_qas.append(s2_boa_qa); brdf_stds.append(brdf_std)
+            boa, boa_qa, brdf_std = get_brdf_six(mcd43_file, angles=[vza, sza, raa],\
+                                                 bands=(3,4,1,2,6,7), Linds= [Lx, Ly])
+            boas.append(boa); boa_qas.append(boa_qa); brdf_stds.append(brdf_std)
 
-        self.s2_boa    = np.hstack(boas)
-        self.s2_boa_qa = np.hstack(boa_qas)
+        self.boa    = np.hstack(boas)
+        self.boa_qa = np.hstack(boa_qas)
         self.brdf_stds = np.hstack(brdf_stds)
         self.logger.info('Applying spectral transform.')
-        self.s2_boa = self.s2_boa*np.array(self.s2_spectral_transform)[0,:-1][...,None] + \
-                                  np.array(self.s2_spectral_transform)[1,:-1][...,None]
+        self.boa = self.boa*np.array(self.spectral_transform)[0][...,None] + \
+                            np.array(self.spectral_transform)[1][...,None]
         self.Hx  = np.hstack(Hxs)
+        self.Hy  = np.hstack(Hys)
+        
+    def solving_l8_aerosol(self,):
+        self.logger = logging.getLogger('Landsat 8 Atmospheric Correction')
+        self.logger.setLevel(logging.INFO)
+        if not self.logger.handlers:
+            ch = logging.StreamHandler()
+            ch.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            ch.setFormatter(formatter)
+            self.logger.addHandler(ch)
+        self.logger.propagate = False
 
+        self.sensor  = 'OLI'
+        self.logger.info('Doing Landsat 8 tile: (%s, %s) on %d-%02d-%02d.' \
+                          % (self.l8_tile[0], self.l8_tile[1], self.year, self.month, self.day))
+        self._l8_aerosol()
+
+if __name__ == '__main__':
+    aero = solve_aerosol(2017, 4, 21, l8_tile = (123, 34), mcd43_dir   = '/home/ucfafyi/DATA/S2_MODIS/m_data/')
+    aero.solving_l8_aerosol()

@@ -154,7 +154,7 @@ def Find_corresponding_pixels(H_res_fname, destination_res=500):
 
     g = gdal.Open(H_res_fname)
     geo_t = g.GetGeoTransform()
-    x_size, y_size = g.RasterXSize, g.RasterYSize
+    x_size, y_size = g.RasterYSize, g.RasterXSize
 
     wgs84 = osr.SpatialReference( ) # Define a SpatialReference object
     wgs84.ImportFromEPSG( 4326 ) # And set it to WGS84 using the EPSG code

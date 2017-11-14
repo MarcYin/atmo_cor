@@ -51,7 +51,7 @@ class reproject_data(object):
             self.g = gdal.Warp('', self.source_img, format = 'MEM', outputBounds = \
                                [self.xmin, self.ymin, self.xmax, self.ymax], xRes = \
                                 self.xRes, yRes = self.yRes, dstSRS = self.dstSRS, copyMetadata=True)
-        if self.g.RasterCount < 3:
+        if self.g.RasterCount <= 3:
             self.data = self.g.ReadAsArray()
             #return self.data
         elif self.verbose:

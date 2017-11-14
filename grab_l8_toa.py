@@ -1,6 +1,20 @@
 #/usr/bin/env python
+import os
+import sys
+sys.path.insert(0, 'python')
 import gdal
+import numpy as np
 from glob import glob
+import subprocess
+from datetime import datetime
+from multi_process import parmap
+
+def gdal_reader(fname):
+    g = gdal.Open(fname)
+    if g is None:
+        raise IOError
+    else:
+        return g.ReadAsArray()
 
 class read_l8(object):
     '''
@@ -12,7 +26,8 @@ class read_l8(object):
                  year,
                  month,
                  day,
-                 bands = None
+                 bands = None,
+                 angle_exe = '/home/ucfafyi/DATA/S2_MODIS/l_data/l8_angles/l8_angles'
                 ):
         self.toa_dir   = toa_dir
         self.tile      = tile
@@ -22,11 +37,72 @@ class read_l8(object):
         if bands is None:
             self.bands = np.arange(1, 8)
         else:
-            self.bands = bands
-
-    def _get_toa(self,):
-        composite    = glob(self.toa_dir + '/LC08_L1TP_%03d%03d_%04d%02d%02d_*_01_T1_toa_band1.tif' \
+            self.bands = np.array(bands)
+        self.angle_exe = angle_exe
+        composite      = glob(self.toa_dir + '/LC08_L1TP_%03d%03d_%04d%02d%02d_*_01_??_toa_band1.tif' \
                          % ( self.tile[0], self.tile[1], self.year, self.month, self.day))[0].split('/')[-1].split('_')[:-2]
-        composite[4] = '*'
-        header       = '_'.join(composite)    
-        
+        self.header    = '_'.join(composite)    
+        self.toa_file  = [self.toa_dir + '/%s_b%d.tif'%(self.header, i) for i in self.bands]
+        self.mete_file =  self.toa_dir + '/%s_MTL.txt'%self.header 
+        self.qa_file   =  self.toa_dir + '/%s_bqa.tif'%self.header
+        try:
+            self.saa_sza = [self.toa_dir + '/%s_solar_B%02d.img' %(self.header, i) for i in self.bands]
+            self.vaa_vza = [self.toa_dir + '/%s_sensor_B%02d.img'%(self.header, i) for i in self.bands]
+        except:
+           ang_file     = self.toa_dir + '/%s_ANG.txt'%self.header
+           cwd = os.getcwd()
+           os.chdir(self.toa_dir)
+           f            =  lambda band: subprocess.call([self.angle_exe, ang_file, \
+                                                         'BOTH', '1', '-f', '-32768', '-b', str(band)])
+           parmap(f, self.bands)
+           os.chdir(cwd)
+           self.saa_sza = [self.toa_dir + '/%s_solar_B%02d.img' %(self.header, i) for i in self.bands]
+           self.vaa_vza = [self.toa_dir + '/%s_sensor_B%02d.img'%(self.header, i) for i in self.bands]
+
+   
+    def _get_toa(self,):
+        try:
+            scale, offset = self._get_scale()
+        except:
+            raise IOError, 'Failed read in scalling factors.'
+        bands_scale  = scale [self.bands-1]
+        bands_offset = offset[self.bands-1] 
+        toa          = np.array(parmap(gdal_reader, self.toa_file)).astype(float) * \
+                                bands_scale[...,None, None] + bands_offset[...,None, None]
+        self._get_angles()
+        self._get_qa()
+        toa      = toa / np.cos(np.deg2rad(self.sza))
+        toa_mask = toa < 0
+        mask     = self.qa_mask | toa_mask | self.ang_mask
+        toa      = np.ma.array(toa, mask=mask)
+        return toa
+    def _get_angles(self,):
+        self.saa, self.sza = np.array(parmap(gdal_reader, self.saa_sza)).astype(float).transpose(1,0,2,3)/100.
+        self.vaa, self.vza = np.array(parmap(gdal_reader, self.vaa_vza)).astype(float).transpose(1,0,2,3)/100.
+        self.saa = np.ma.array(self.saa, mask = ((self.saa > 180) | (self.saa < -180)))
+        self.sza = np.ma.array(self.sza, mask = ((self.sza > 90 ) | (self.sza < 0   )))
+        self.vaa = np.ma.array(self.vaa, mask = ((self.vaa > 180) | (self.vaa < -180)))
+        self.vza = np.ma.array(self.vza, mask = ((self.vza > 90 ) | (self.vza < 0   )))
+        self.ang_mask = self.saa.mask | self.sza.mask | self.vaa.mask | self.vza.mask
+    def _get_scale(self,):
+        scale, offset = [], []
+        with open( self.mete_file, 'rb') as f:
+            for line in f:
+                if 'REFLECTANCE_MULT_BAND' in line:
+                    scale.append(float(line.split()[-1]))
+                elif 'REFLECTANCE_ADD_BAND' in line:
+                    offset.append(float(line.split()[-1]))
+                elif 'DATE_ACQUIRED' in line:
+                    date = line.split()[-1]
+                elif 'SCENE_CENTER_TIME' in line:
+                    time = line.split()[-1]
+        datetime_str  = date + time
+        self.sen_time = datetime.strptime(datetime_str, '%Y-%m-%d"%H:%M:%S.%f0Z"')
+        return np.array(scale), np.array(offset)
+
+    def _get_qa(self,):
+        bqa = gdal_reader(self.qa_file)
+        self.qa_mask = (bqa & 31).astype(bool)
+if __name__ == '__main__':
+    l8 = read_l8('/home/ucfafyi/DATA/S2_MODIS/l_data/', (123, 34), 2017, 4, 21, bands=[2,3,4,5,6,7])
+    toa = l8._get_toa()

@@ -137,8 +137,8 @@ class solve_aerosol(object):
 		for j, band in enumerate (self.s2_u_bands[:-2]):
                     vhx, vhy = (1.*Hx*self.s2.angles['vza'][band].shape[0]/self.full_res[0]).astype(int), \
                                (1.*Hy*self.s2.angles['vza'][band].shape[1]/self.full_res[1]).astype(int)
-                    self.s2_angles[[0,2],j,:] = (self.s2.angles['vza'][band].astype(float)/100.)[vhx, vhy], \
-                                                (self.s2.angles['vaa'][band].astype(float)/100.)[vhx, vhy]
+                    self.s2_angles[[0,2],j,:] = (self.s2.angles['vza'][band])[vhx, vhy], \
+                                                (self.s2.angles['vaa'][band])[vhx, vhy]
 
 		    self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy], \
                                                 self.s2.angles['saa'][hx, hy]

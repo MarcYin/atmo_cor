@@ -115,7 +115,6 @@ class solve_aerosol(object):
         self.mcd43_files = []
         boas, boa_qas, brdf_stds, Hxs, Hys    = [], [], [], [], []
         for key in tiles.keys():
-            #h,v = int(key[1:3]), int(key[-2:])
             self.s2_logger.info('Getting BOA from MODIS tile: %s.'%key)
             mcd43_file  = glob(self.mcd43_tmp%(self.mcd43_dir, self.year, self.doy, key))[0]
             self.mcd43_files.append(mcd43_file)
@@ -131,10 +130,8 @@ class solve_aerosol(object):
 		hx, hy = (Hx*23./self.full_res[0]).astype(int), \
                          (Hy*23./self.full_res[1]).astype(int) # index the 23*23 sun angles
 		for j, band in enumerate (self.s2_u_bands[:-2]):
-                    vhx, vhy = (1.*Hx*self.s2.angles['vza'][band].shape[0]/self.full_res[0]).astype(int), \
-                               (1.*Hy*self.s2.angles['vza'][band].shape[1]/self.full_res[1]).astype(int)
-		    self.s2_angles[[0,2],j,:] = (self.s2.angles['vza'][band].astype(float)/100.)[vhx, vhy], \
-                                                (self.s2.angles['vaa'][band].astype(float)/100.)[vhx, vhy]
+		    self.s2_angles[[0,2],j,:] = (self.s2.angles['vza'][band])[Hx, Hy], \
+                                                (self.s2.angles['vaa'][band])[Hx, Hy]
 
 		    self.s2_angles[[1,3],j,:] = self.s2.angles['sza'][hx, hy], \
                                                 self.s2.angles['saa'][hx, hy]
@@ -184,9 +181,8 @@ class solve_aerosol(object):
                 self.vza.append(self.s2.angles['vza'][band].reshape(shape).mean(axis = (3, 1)))
                 self.vaa.append(self.s2.angles['vaa'][band].reshape(shape).mean(axis = (3, 1)))
             else:
-                self.vza.append(self.s2.angles['vza'][band]) 
-                self.vaa.append(self.s2.angles['vaa'][band])
-  
+                self.vza.append(self.s2.angles['vza'][band][x_resamp, y_resamp].reshape(self.num_blocks, self.num_blocks)) 
+                self.vaa.append(self.s2.angles['vaa'][band][x_resamp, y_resamp].reshape(self.num_blocks, self.num_blocks))
         self.vza = np.array(self.vza) 
         self.vaa = np.array(self.vaa)
         self.raa = self.saa[None, ...] - self.vaa

@@ -21,6 +21,8 @@ from atmo_paras_optimization_new import solving_atmo_paras
 from psf_optimize import psf_optimize
 from spatial_mapping import Find_corresponding_pixels
 
+from scipy.stats import linregress
+
 class solve_aerosol(object):
     '''
     Prepareing modis data to be able to pass into 
@@ -132,8 +134,8 @@ class solve_aerosol(object):
         self.logger.info('Getting elevation.')
         ele_data = reproject_data(self.global_dem, self.example_file).data
         mask = ~np.isfinite(ele_data)
-        ele_data = np.ma.array(ele_data, mask = mask)
-        self.elevation = ele_data[self.Hx, self.Hy]/1000.
+        ele_data = np.ma.array(ele_data, mask = mask)/1000.
+        self.elevation = ele_data[self.Hx, self.Hy]
         
         self.logger.info('Getting pripors from ECMWF forcasts.')
         aot, tcwv, tco3 = np.array(self._read_cams(self.example_file))
@@ -146,7 +148,7 @@ class solve_aerosol(object):
 
         self.logger.info('Trying to get the aod from ddv method.')
         #try:
-	ndvi_mask = (((toa[5] - toa[2])/(toa[5] + toa[2])) > 0.5) & (toa[5] > 0.01) & (toa[5] < 0.25)
+	ndvi_mask = (((toa[5] - toa[2])/(toa[5] + toa[2])) > 0.4) & (toa[5] > 0.01) & (toa[5] < 0.25)
 	if ndvi_mask.sum() < 100:
 	    self.logger.info('No enough DDV found in this sence for aot restieval, and only cams prediction used.') 
 	else:
@@ -166,8 +168,8 @@ class solve_aerosol(object):
 	    red_raa   = np.cos(np.deg2rad(l8.vaa[2, Hx, Hy] - l8.saa[2, Hx, Hy]))
 	    red, blue = toa[2, Hx, Hy], toa[0, Hx, Hy]
 	    swif      = toa[5, Hx, Hy]
-	    red_emus  = np.array(self.emus)[:, 2]
-	    blue_emus = np.array(self.emus)[:, 0]
+	    red_emus  = np.array(self.emus)[:, 3]
+	    blue_emus = np.array(self.emus)[:, 1]
 
 	    zero_aod    = np.zeros_like(red)
 	    red_inputs  = np.array([red_sza,  red_vza,  red_raa,  zero_aod, tcwv[Hx, Hy], tco3[Hx, Hy], ele_data[Hx, Hy]])
@@ -197,9 +199,14 @@ class solve_aerosol(object):
         blue_sur = y / (1 + blue_xcp * y)
         y        = red_xap * red - red_xbp
         red_sur  = y / (1 + red_xcp * y)
+        print linregress(swif, blue)
+        print linregress(swif, red)
+        print linregress(swif, blue_sur) 
+        print linregress(swif, red_sur)
         blue_dif = (blue_sur - 0.25 * swif)**2
         red_dif  = (red_sur  - 0.5  * swif)**2
         cost     = 0.5 * (blue_dif + red_dif)
+        print cost.sum()
         return cost.sum()
 
     def _read_cams(self, example_file, parameters = ['aod550', 'tcwv', 'gtco3'], this_scale=[1., 0.1, 46.698]):

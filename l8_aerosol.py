@@ -199,14 +199,9 @@ class solve_aerosol(object):
         blue_sur = y / (1 + blue_xcp * y)
         y        = red_xap * red - red_xbp
         red_sur  = y / (1 + red_xcp * y)
-        print linregress(swif, blue)
-        print linregress(swif, red)
-        print linregress(swif, blue_sur) 
-        print linregress(swif, red_sur)
         blue_dif = (blue_sur - 0.25 * swif)**2
         red_dif  = (red_sur  - 0.5  * swif)**2
         cost     = 0.5 * (blue_dif + red_dif)
-        print cost.sum()
         return cost.sum()
 
     def _read_cams(self, example_file, parameters = ['aod550', 'tcwv', 'gtco3'], this_scale=[1., 0.1, 46.698]):

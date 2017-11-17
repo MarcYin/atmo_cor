@@ -259,24 +259,19 @@ class atmospheric_correction(object):
     def get_control_variables(self, target_band):
 
 	aod = reproject_data(self.s2.s2_file_dir+'/aot.tif', \
-                             self.s2.s2_file_dir+'/%s.jp2'%target_band)
-        aod.get_it()
+                             self.s2.s2_file_dir+'/%s.jp2'%target_band).data
 
         tcwv = reproject_data(self.s2.s2_file_dir+'/tcwv.tif', \
-                              self.s2.s2_file_dir+'/%s.jp2'%target_band)
-        tcwv.get_it()
+                              self.s2.s2_file_dir+'/%s.jp2'%target_band).data
 
         tco3 = reproject_data(self.s2.s2_file_dir+'/tco3.tif', \
-                              self.s2.s2_file_dir+'/%s.jp2'%target_band)
-        tco3.get_it()
+                              self.s2.s2_file_dir+'/%s.jp2'%target_band).data
+        ele = reproject_data(self.global_dem, self.s2.s2_file_dir+'/%s.jp2'%target_band).data
+        mask = ~np.isfinite(ele)
+        ele[mask] = np.interp(np.flatnonzero(mask), \
+                              np.flatnonzero(~mask), ele[~mask]) # simple interpolation
 
-        ele = reproject_data(self.global_dem, self.s2.s2_file_dir+'/%s.jp2'%target_band)
-        ele.get_it()
-        mask = ~np.isfinite(ele.data)
-        ele.data[mask] = np.interp(np.flatnonzero(mask), \
-                                   np.flatnonzero(~mask), ele.data[~mask]) # simple interpolation
-
-        return aod.data, tcwv.data, tco3.data, ele.data
+        return aod, tcwv, tco3, ele
 
 
     def fire_correction(self, toa, sza, vza, saa, vaa, aod, tcwv, tco3, elevation, band_indexs):

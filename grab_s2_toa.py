@@ -75,6 +75,50 @@ class read_s2(object):
         return self.selected_img
 
     def get_s2_cloud(self,):
+        if glob(self.s2_file_dir+'/cloud.tif')==[]:
+            print 'Rasterizing cloud mask'
+            g     = gdal.Open(self.s2_file_dir+'/B04.jp2')
+            geo_t = g.GetGeoTransform()
+            x_size, y_size = g.RasterXSize, g.RasterYSize
+            xmin, xmax  = min(geo_t[0], geo_t[0] + x_size * geo_t[1]), \
+                          max(geo_t[0], geo_t[0] + x_size * geo_t[1])
+            ymin, ymax  = min(geo_t[3], geo_t[3] + y_size * geo_t[5]), \
+                          max(geo_t[3], geo_t[3] + y_size * geo_t[5])
+            xRes, yRes  = abs(geo_t[1]), abs(geo_t[5])
+            try:
+                self.cirrus = gdal.Rasterize("", self.s2_file_dir+ "/qi/MSK_CLOUDS_B00.gml", \
+                                             format="MEM", xRes=xRes, yRes=yRes, where="maskType='CIRRUS'", \
+                                             outputBounds=[xmin, ymin, xmax, ymax], noData=0, burnValues=1).ReadAsArray()
+            except:
+                self.cirrus = np.zeros((x_size, y_size)).astype(bool)
+            try:
+                self.cloud  = gdal.Rasterize("", self.s2_file_dir+ "/qi/MSK_CLOUDS_B00.gml", \
+                                             format="MEM", xRes=xRes, yRes=yRes, where="maskType='OPAQUE'", \
+                                             outputBounds=[xmin, ymin, xmax, ymax], noData=0, burnValues=2).ReadAsArray()
+            except:
+                self.cloud  = np.zeros((x_size, y_size)).astype(bool)
+            cloud_mask  = self.cirrus + self.cloud
+            driver = gdal.GetDriverByName('GTiff')
+            g1 = driver.Create(self.s2_file_dir+'/cloud.tif', \
+                               g.RasterXSize, g.RasterYSize, 1, gdal.GDT_Byte)
+            projection   = g.GetProjection()
+            geotransform = g.GetGeoTransform()
+            g1.SetGeoTransform( geotransform )
+            g1.SetProjection( projection )
+            gcp_count = g.GetGCPs()
+            if gcp_count != 0:
+                g1.SetGCPs( gcp_count, g.GetGCPProjection() )
+            g1.GetRasterBand(1).WriteArray(cloud_mask)
+            g1=None; g=None
+        else:
+            cloud_mask = gdal.Open(self.s2_file_dir+\
+                                   '/cloud.tif').ReadAsArray()
+        self.cirrus = (cloud_mask == 1)
+        self.cloud  = (cloud_mask >= 2)
+        self.cloud_cover = 1.*(self.cloud==2)/self.cloud.size
+
+
+    def get_s2_cloud_old(self,):
         if glob(self.s2_file_dir+'/cloud.tiff')==[]:
             print 'loading Sentinel2 data...'
             needed_bands = 'B02', 'B03', 'B04', 'B08', 'B11', 'B12', 'B8A'
@@ -114,8 +158,8 @@ class read_s2(object):
             g1=None; g=None
             del cl
         else:
-            self.cloud = cloud = gdal.Open(self.s2_file_dir+\
-                                           '/cloud.tiff').ReadAsArray().astype(bool)
+            self.cloud = gdal.Open(self.s2_file_dir+\
+                                   '/cloud.tiff').ReadAsArray().astype(bool)
         self.cloud_cover = 1.*self.cloud.sum()/self.cloud.size
 
     def get_s2_angles(self, reconstruct = True, slic = None):
@@ -236,7 +280,7 @@ class read_s2(object):
             if len(glob(self.s2_file_dir + '/angles/VAA_VZA_*.img')) == 13:
                 pass
             else:
-                print 'Reconstructing Sentinel 2 angles...'
+                #print 'Reconstructing Sentinel 2 angles...'
                 subprocess.call(['python', './python/s2a_angle_bands_mod.py', \
                                   self.s2_file_dir+'/metadata.xml',  '10'])
 

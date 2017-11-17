@@ -69,7 +69,6 @@ class read_l8(object):
         bands_offset = offset[self.bands-1] 
         toa          = np.array(parmap(gdal_reader, self.toa_file)).astype(float) * \
                                 bands_scale[...,None, None] + bands_offset[...,None, None]
-        self._get_angles()
         self._get_qa()
         toa      = toa / np.cos(np.deg2rad(self.sza))
         toa_mask = toa < 0
@@ -97,7 +96,7 @@ class read_l8(object):
                 elif 'SCENE_CENTER_TIME' in line:
                     time = line.split()[-1]
         datetime_str  = date + time
-        self.sen_time = datetime.strptime(datetime_str, '%Y-%m-%d"%H:%M:%S.%f0Z"')
+        self.sen_time = datetime.strptime(datetime_str.split('.')[0], '%Y-%m-%d"%H:%M:%S')
         return np.array(scale), np.array(offset)
 
     def _get_qa(self,):

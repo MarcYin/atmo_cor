@@ -86,13 +86,7 @@ class solve_aerosol(object):
         self.logger.propagate = False
         self.logger.info('Start to retrieve atmospheric parameters.')
         l8 = read_l8(self.l8_toa_dir, self.l8_tile, self.year, self.month, self.day, bands = self.bands)
-        self.logger.info('Reading in TOA reflectance.')
-        self.toa      = l8._get_toa()
-        self.sza      = l8.sza
-        self.vza      = l8.vza
-        self.saa      = l8.saa
-        self.vaa      = l8.vaa
-        self.sen_time = l8.sen_time
+        l8._get_angles()
         self.logger.info('Loading emulators.')
         self._load_xa_xb_xc_emus()
         self.logger.info('Find corresponding pixels between L8 and MODIS tiles')
@@ -111,8 +105,8 @@ class solve_aerosol(object):
             Hx, Hy = self.H_inds
             Hxs.append(Hx); Hys.append(Hy)
 
-            vza, sza = self.vza[:, Hx, Hy], self.sza[:, Hx, Hy]
-            vaa, saa = self.vaa[:, Hx, Hy], self.saa[:, Hx, Hy]
+            vza, sza = l8.vza[:, Hx, Hy], l8.sza[:, Hx, Hy]
+            vaa, saa = l8.vaa[:, Hx, Hy], l8.saa[:, Hx, Hy]
             raa      = vaa - saa
             boa, boa_qa, brdf_std = get_brdf_six(mcd43_file, angles=[vza, sza, raa],\
                                                  bands=(3,4,1,2,6,7), Linds= [Lx, Ly])
@@ -126,6 +120,115 @@ class solve_aerosol(object):
                             np.array(self.spectral_transform)[1][...,None]
         self.Hx  = np.hstack(Hxs)
         self.Hy  = np.hstack(Hys)
+        self.sza      = l8.sza[:, self.Hx, self.Hy]
+        self.vza      = l8.vza[:, self.Hx, self.Hy]
+        self.saa      = l8.saa[:, self.Hx, self.Hy]
+        self.vaa      = l8.vaa[:, self.Hx, self.Hy]
+        self.logger.info('Reading in TOA reflectance.')
+        toa           = l8._get_toa()
+        self.toa      = toa[:, self.Hx, self.Hy]
+        self.sen_time = l8.sen_time
+
+        self.logger.info('Getting elevation.')
+        ele_data = reproject_data(self.global_dem, self.example_file).data
+        mask = ~np.isfinite(ele_data)
+        ele_data = np.ma.array(ele_data, mask = mask)
+        self.elevation = ele_data[self.Hx, self.Hy]/1000.
+        
+        self.logger.info('Getting pripors from ECMWF forcasts.')
+        aot, tcwv, tco3 = np.array(self._read_cams(self.example_file))
+        self.aot        = aot [self.Hx, self.Hy] #* (1-0.14) # validation of +14% biase
+        self.tco3       = tco3[self.Hx, self.Hy] #* (1 - 0.05)
+        self.tcwv       = tcwv[self.Hx, self.Hy]
+        self.aot_unc    = np.ones(self.aot.shape)  * 0.5
+        self.tcwv_unc   = np.ones(self.tcwv.shape) * 0.2
+        self.tco3_unc   = np.ones(self.tco3.shape) * 0.2
+
+        self.logger.info('Trying to get the aod from ddv method.')
+        #try:
+	ndvi_mask = (((toa[5] - toa[2])/(toa[5] + toa[2])) > 0.5) & (toa[5] > 0.01) & (toa[5] < 0.25)
+	if ndvi_mask.sum() < 100:
+	    self.logger.info('No enough DDV found in this sence for aot restieval, and only cams prediction used.') 
+	else:
+	    Hx, Hy = np.where(ndvi_mask)
+            if ndvi_mask.sum() > 25000000: 
+	        random_choice     = np.random.choice(len(Hx), 25000000, replace=False)
+	        random_choice.sort()
+	        Hx, Hy            = Hx[random_choice], Hy[random_choice]
+	        ndvi_mask[:]      = False
+	        ndvi_mask[Hx, Hy] = True
+	    Hx, Hy    = np.where(ndvi_mask)
+	    blue_vza  = np.cos(np.deg2rad(l8.vza[0, Hx, Hy]))
+            blue_sza  = np.cos(np.deg2rad(l8.sza[0, Hx, Hy]))
+	    red_vza   = np.cos(np.deg2rad(l8.vza[2, Hx, Hy])) 
+            red_sza   = np.cos(np.deg2rad(l8.sza[2, Hx, Hy]))
+	    blue_raa  = np.cos(np.deg2rad(l8.vaa[0, Hx, Hy] - l8.saa[0, Hx, Hy]))
+	    red_raa   = np.cos(np.deg2rad(l8.vaa[2, Hx, Hy] - l8.saa[2, Hx, Hy]))
+	    red, blue = toa[2, Hx, Hy], toa[0, Hx, Hy]
+	    swif      = toa[5, Hx, Hy]
+	    red_emus  = np.array(self.emus)[:, 2]
+	    blue_emus = np.array(self.emus)[:, 0]
+
+	    zero_aod    = np.zeros_like(red)
+	    red_inputs  = np.array([red_sza,  red_vza,  red_raa,  zero_aod, tcwv[Hx, Hy], tco3[Hx, Hy], ele_data[Hx, Hy]])
+	    blue_inputs = np.array([blue_sza, blue_vza, blue_raa, zero_aod, tcwv[Hx, Hy], tco3[Hx, Hy], ele_data[Hx, Hy]])
+	    
+	    p           = np.r_[np.arange(0, 1., 0.02), np.arange(1., 1.5, 0.05),  np.arange(1.5, 2., 0.1)]
+	    f           =  lambda aot: self._ddv_cost(aot, blue, red, swif, blue_inputs, red_inputs,  blue_emus, red_emus)
+	    costs       = parmap(f, p)
+	    min_ind     = np.argmin(costs)
+	    self.logger.info('DDV solved aod is %.02f, and it will used as the mean value of cams prediction.'% p[min_ind])
+            self.aot   += (p[min_ind] - self.aot.mean())
+            self.costs = costs
+            self.p     = p
+
+    def _ddv_cost(self, aot, blue, red, swif, blue_inputs, red_inputs,  blue_emus, red_emus):
+        blue_inputs[3, :] = aot
+        red_inputs [3, :] = aot
+        blue_xap_emu, blue_xbp_emu, blue_xcp_emu = blue_emus
+        red_xap_emu,  red_xbp_emu,  red_xcp_emu  = red_emus
+        blue_xap, blue_xbp, blue_xcp             = blue_xap_emu.predict(blue_inputs.T)[0], \
+                                                   blue_xbp_emu.predict(blue_inputs.T)[0], \
+                                                   blue_xcp_emu.predict(blue_inputs.T)[0]
+        red_xap,  red_xbp,  red_xcp              = red_xap_emu.predict(red_inputs.T)  [0], \
+                                                   red_xbp_emu.predict(red_inputs.T)  [0], \
+                                                   red_xcp_emu.predict(red_inputs.T)  [0]
+        y        = blue_xap * blue - blue_xbp
+        blue_sur = y / (1 + blue_xcp * y)
+        y        = red_xap * red - red_xbp
+        red_sur  = y / (1 + red_xcp * y)
+        blue_dif = (blue_sur - 0.25 * swif)**2
+        red_dif  = (red_sur  - 0.5  * swif)**2
+        cost     = 0.5 * (blue_dif + red_dif)
+        return cost.sum()
+
+    def _read_cams(self, example_file, parameters = ['aod550', 'tcwv', 'gtco3'], this_scale=[1., 0.1, 46.698]):
+	netcdf_file = datetime.datetime(self.sen_time.year, self.sen_time.month, \
+					self.sen_time.day).strftime("%Y-%m-%d.nc")
+	template    = 'NETCDF:"%s":%s'
+	ind         = np.abs((self.sen_time.hour  + self.sen_time.minute/60. + \
+			      self.sen_time.second/3600.) - np.arange(0,25,3)).argmin()
+	sr         = osr.SpatialReference()
+	sr.ImportFromEPSG(4326)
+	proj       = sr.ExportToWkt()
+	results = []
+	for i, para in enumerate(parameters):
+	    fname   = template%(self.cams_dir + '/' + netcdf_file, para)
+	    g       = gdal.Open(fname)
+	    g.SetProjection(proj)
+	    sub     = g.GetRasterBand(ind+1)
+	    offset  = sub.GetOffset()
+	    scale   = sub.GetScale()
+	    bad_pix = int(sub.GetNoDataValue())
+	    rep_g   = reproject_data(g, example_file).g
+	    data    = rep_g.GetRasterBand(ind+1).ReadAsArray()
+	    data    = data*scale + offset
+	    mask    = (data == (bad_pix*scale + offset))
+	    if mask.sum()>=1:
+		data[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), data[~mask])
+	    results.append(data*this_scale[i])
+        return results
+
         
     def solving_l8_aerosol(self,):
         self.logger = logging.getLogger('Landsat 8 Atmospheric Correction')
@@ -144,5 +247,5 @@ class solve_aerosol(object):
         self._l8_aerosol()
 
 if __name__ == '__main__':
-    aero = solve_aerosol(2017, 4, 21, l8_tile = (123, 34), mcd43_dir   = '/home/ucfafyi/DATA/S2_MODIS/m_data/')
+    aero = solve_aerosol(2017, 7, 10, l8_tile = (123, 34), mcd43_dir   = '/home/ucfafyi/DATA/S2_MODIS/m_data/')
     aero.solving_l8_aerosol()

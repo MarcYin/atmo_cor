@@ -31,12 +31,12 @@ class solve_aerosol(object):
                  year, 
                  month, 
                  day,
-                 emus_dir    = '/home/ucfajlg/Data/python/S2S3Synergy/optical_emulators',
+                 emus_dir    = '/home/ucfafyi/DATA/Multiply/emus/',
                  mcd43_dir   = '/data/selene/ucfajlg/Ujia/MCD43/',
                  s2_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/s_data/',
                  l8_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/l_data/',
                  global_dem  = '/home/ucfafyi/DATA/Multiply/eles/global_dem.vrt',
-                 wv_emus_dir = '/home/ucfafyi/DATA/Multiply/Atmo_cor/data/wv_msi_retrieval_NEW.pkl',
+                 wv_emus_dir = '/home/ucfafyi/DATA/Multiply/emus/wv_msi_retrieval.pkl',
                  cams_dir    = '/home/ucfafyi/DATA/Multiply/cams/',
                  s2_tile     = '29SQB',
                  l8_tile     = (204,33),
@@ -119,7 +119,7 @@ class solve_aerosol(object):
         self.mcd43_files = []
         szas, vzas, saas, vaas, raas          = [], [], [], [], []
         boas, boa_qas, brdf_stds, Hxs, Hys    = [], [], [], [], []
-        for key in tiles.keys()[1:]:
+        for key in tiles.keys():
             #h,v = int(key[1:3]), int(key[-2:])
             self.s2_logger.info('Getting BOA from MODIS tile: %s.'%key)
             mcd43_file  = glob(self.mcd43_tmp%(self.mcd43_dir, self.year, self.doy, key))[0]
@@ -232,7 +232,7 @@ class solve_aerosol(object):
             b2, b4, b8, b12 = selected_img['B02']/10000., selected_img['B04']/10000., \
                               selected_img['B08']/10000., selected_img['B12']/10000.,
             b12 = np.repeat(np.repeat(b12, 2, axis = 1), 2, axis = 0)
-            this_ddv  = ddv(b2, b4, b8, b12, 'MSI', sza, np.array([blue_vza, red_vza]), \
+            this_ddv  = ddv(b2, b4, b8, b12, 'msi', sza, np.array([blue_vza, red_vza]), \
 			    np.array([blue_raa, red_raa]), _ele, _tcwv, _tco3, red_emus = None, blue_emus = None)
             solved = this_ddv._ddv_prior()      
             if solved[0] < 0:
@@ -454,6 +454,6 @@ class solve_aerosol(object):
 
 if __name__ == "__main__":
     aero = solve_aerosol( 2017, 9, 4, mcd43_dir = '/home/ucfafyi/DATA/Multiply/MCD43/', \
-                                   emus_dir = '/home/ucfafyi/DATA/Multiply/', s2_tile='29SQB', s2_psf=None)
+                                      emus_dir = '/home/ucfafyi/DATA/Multiply/emus/', s2_tile='29SQB', s2_psf=None)
     aero.solving_s2_aerosol()
     #solved  = aero.prepare_modis()

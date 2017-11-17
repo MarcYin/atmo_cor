@@ -59,7 +59,7 @@ class ddv(object):
         self._load_xa_xb_xc_emus()
         ndvi = (self.nir - self.red)/(self.nir + self.red)
         ndvi_mask = (ndvi > 0.6) & (self.swif > 0.01) & (self.swif < 0.25)
-        if ndvi_mask.sum() < 3:
+        if ndvi_mask.sum() < 100:
             return (-9999, 9999) # need to have at least 100 pixels to get a relative good estimation of aod
         elif ndvi_mask.sum() > 25000000:
             Hx, Hy                      = np.where(ndvi_mask)
@@ -130,7 +130,7 @@ class ddv(object):
         y        = red_xap * self.red[self._ndvi_mask] - red_xbp
         red_sur  = y / (1 + red_xcp * y)
         blue_dif = (blue_sur - 0.25 * self.swif[self._ndvi_mask])**2
-        red_dif  = (blue_sur - 0.5  * self.swif[self._ndvi_mask])**2
+        red_dif  = (red_sur  - 0.5  * self.swif[self._ndvi_mask])**2
         cost     = 0.5 * (blue_dif + red_dif)
         return cost
          
@@ -183,7 +183,7 @@ if __name__ == '__main__':
     b8  = gdal.Open('/home/ucfafyi/DATA/S2_MODIS/s_data/50/S/LG/2016/2/3/0/B08.jp2').ReadAsArray()/10000.
     b12 = gdal.Open('/home/ucfafyi/DATA/S2_MODIS/s_data/50/S/LG/2016/2/3/0/B12.jp2').ReadAsArray()/10000.
     b12 = np.repeat(np.repeat(b12, 2, axis = 1), 2, axis = 0)
-    this_ddv = ddv(b2, b4, b8, b12, 'MSI', sza, vza, raa, ele, tcwv, tco3, band_index = [1, 3])
+    this_ddv = ddv(b2, b4, b8, b12, 'msi', sza, vza, raa, ele, tcwv, tco3, band_index = [1, 3])
     
     solved = this_ddv._ddv_prior()
     #solevd = this_ddv._optimization()

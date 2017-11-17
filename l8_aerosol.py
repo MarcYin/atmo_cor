@@ -148,7 +148,7 @@ class solve_aerosol(object):
 
         self.logger.info('Trying to get the aod from ddv method.')
         #try:
-	ndvi_mask = (((toa[5] - toa[2])/(toa[5] + toa[2])) > 0.4) & (toa[5] > 0.01) & (toa[5] < 0.25)
+	ndvi_mask = (((toa[5] - toa[2])/(toa[5] + toa[2])) > 0.5) & (toa[5] > 0.01) & (toa[5] < 0.25)
 	if ndvi_mask.sum() < 100:
 	    self.logger.info('No enough DDV found in this sence for aot restieval, and only cams prediction used.') 
 	else:

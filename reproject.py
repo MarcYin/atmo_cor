@@ -33,7 +33,10 @@ class reproject_data(object):
         if (self.target_img is None) & (self.dstSRS is None):
             raise IOError, 'Projection should be specified ether from a file or a projection code.'
         elif self.target_img is not None:
-            g     = gdal.Open(self.target_img)
+            try:
+                g     = gdal.Open(self.target_img)
+            except:
+                g     = target_img
             geo_t = g.GetGeoTransform()
             x_size, y_size = g.RasterXSize, g.RasterYSize     
             xmin, xmax = min(geo_t[0], geo_t[0] + x_size * geo_t[1]), \

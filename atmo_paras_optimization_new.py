@@ -224,7 +224,7 @@ class solving_atmo_paras(object):
         up  = up.ravel()
         bounds  = np.array([bot, up]).T 
         psolve = optimize.fmin_l_bfgs_b(self._cost, p0, approx_grad = 0, iprint = 1, \
-                                        maxiter=500, pgtol = 1e-4,factr=1e11, bounds = bounds,fprime=None)
+                                        maxiter=500, pgtol = 1e-4,factr=1e8, bounds = bounds,fprime=None)
         return psolve
 
 if __name__ == '__main__':

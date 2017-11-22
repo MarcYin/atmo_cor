@@ -159,6 +159,7 @@ class ddv(object):
         #p0[:]   = 0.3
         p       = np.r_[np.arange(0, 1., 0.02), np.arange(1., 1.5, 0.05),  np.arange(1.5, 2., 0.1)]
         costs   = parmap(self._cost, p)
+        print p, costs
         min_ind = np.argmin(costs) 
         return p[min_ind], costs[min_ind]
         #psolve = optimize.fmin_l_bfgs_b(self._cost, p0, approx_grad = 1, iprint = 1, maxiter= 3,\

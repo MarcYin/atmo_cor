@@ -227,8 +227,8 @@ class read_s2(object):
         saa  = griddata(np.array(np.where(~mask)).T, saa[~mask], \
                        (np.repeat(range(23), 23).reshape(23,23), \
                         np.tile  (range(23), 23).reshape(23,23)), method='nearest') 
-
-	self.saa, self.sza = np.array(saa), np.array(sza)
+        self.saa, self.sza = np.repeat(np.repeat(np.array(saa), 500, axis = 0), 500, axis = 1)[:10980, :10980], \
+                             np.repeat(np.repeat(np.array(sza), 500, axis = 0), 500, axis = 1)[:10980, :10980]
 	dete_id = np.unique([i[1] for i in vaa.keys()])
 	band_id = range(13)
 	bands_vaa = []
@@ -269,8 +269,8 @@ class read_s2(object):
             g_vaa = griddata(np.array(np.where(~mask)).T, vaa[band][~mask], \
                             (np.repeat(range(23), 23).reshape(23,23), \
                              np.tile  (range(23), 23).reshape(23,23)), method='nearest') 
-	    self.vza[band]  = g_vza
-	    self.vaa[band]  = g_vaa
+	    self.vza[band]  = np.repeat(np.repeat(g_vza, 500, axis = 0), 500, axis = 1)[:10980, :10980]
+	    self.vaa[band]  = np.repeat(np.repeat(g_vaa, 500, axis = 0), 500, axis = 1)[:10980, :10980]
 	    self.mvz[band]  = mvz_[band]
 	    self.mva[band]  = mva_[band]
 	self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
@@ -294,7 +294,7 @@ class read_s2(object):
             f = lambda fn: reproject_data(fn, self.s2_file_dir+'/B04.jp2').data
             ret = parmap(f, fname)
             for i,angs in enumerate(ret):
-                angs[0][angs[0]<0] = 360 + angs[0][angs[0]<0]
+                angs[0][angs[0]<0] = (36000 + angs[0][angs[0]<0])
                 angs = angs.astype(float)/100.
                 if slic is None:
                     self.vaa[bands[i]] = angs[0]
@@ -315,4 +315,3 @@ if __name__ == '__main__':
     s2.get_s2_cloud()
     '''
     s2.get_s2_angles()
-    cibr = s2.get_wv()

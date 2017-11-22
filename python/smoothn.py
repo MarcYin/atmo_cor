@@ -6,13 +6,6 @@ from scipy.fftpack.realtransforms import dct,idct
 import numpy as np
 import numpy.ma as ma
 
-def H(y,t0=0):
-  '''
-  Step fn with step at t0
-  '''
-  h = np.zeros_like(y)
-  args = tuple([slice(0,y.shape[i]) for i in y.ndim])   
-
 def smoothn(y,nS0=10,axis=None,smoothOrder=2.0,sd=None,verbose=False,\
 	s0=None,z0=None,isrobust=False,W=None,s=None,MaxIter=100,TolZ=1e-3,weightstr='bisquare'):
   '''
@@ -256,11 +249,11 @@ def smoothn(y,nS0=10,axis=None,smoothOrder=2.0,sd=None,verbose=False,\
   Lambda = zeros(sizy);
   for i in axis:
     # create a 1 x d array (so e.g. [1,1] for a 2D case
-    siz0 = ones((1,y.ndim))[0];
+    siz0 = ones((1,y.ndim), dtype=np.int)[0];
     siz0[i] = sizy[i];
     # cos(pi*(reshape(1:sizy(i),siz0)-1)/sizy(i)))
     # (arange(1,sizy[i]+1).reshape(siz0) - 1.)/sizy[i]
-    Lambda = Lambda + (cos(pi*(arange(1,sizy[i]+1) - 1.)/sizy[i]).reshape(siz0.astype(int)))
+    Lambda = Lambda + (cos(pi*(arange(1,sizy[i]+1) - 1.)/sizy[i]).reshape(siz0))
     #else:
     #  Lambda = Lambda + siz0
   Lambda = -2.*(len(axis)-Lambda);
@@ -496,7 +489,6 @@ def InitialGuess(y,I):
 # NB: filter is 2*I - (np.roll(I,-1) + np.roll(I,1))
 
 
-
 def dctND(data,f=dct):
   nd = len(data.shape)
   if nd == 1:
@@ -706,4 +698,5 @@ def sparseTest(n=1000):
   # Ut.T * Ut = I
   # ((Vt.T * (np.diag(np.array(eigenvalues).flatten())**2)) * Vt)
   # we see you get the same as m.T * m by squaring the eigenvalues
+
 

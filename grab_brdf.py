@@ -12,6 +12,27 @@ x_step = -463.31271653
 y_step = 463.31271653
 m_y0, m_x0 = -20015109.354, 10007554.677
 
+def r_modis(fname, xoff = None, yoff = None, xsize = None, ysize = None):
+    g = gdal.Open(fname)
+    if g is None:
+        raise IOError
+    else:
+        if x_off is None:
+            return g.ReadAsArray()
+        elif g.RasterCount==1:
+            return g.ReadAsArray(xoff, yoff, xsize, ysize)[Lx-yoff, Ly-xoff]
+        elif g.RasterCount>1:
+            for band in range(g.RasterCount):
+                band += 1
+                rets.append(g.GetRasterBand(band).ReadAsArray(xoff, yoff, xsize, ysize)[Lx-yoff, Ly-xoff])
+            return np.array(rets)
+        else:
+            raise IOError
+
+
+
+
+
 def mtile_cal(lat, lon):
     # a function calculate the tile number for MODIS, based on the lat and lon
     wgs84 = osr.SpatialReference( ) # Define a SpatialReference object
@@ -64,9 +85,18 @@ def get_brdf_six(example_file, year, doy, root, angles, bands = (7,), Linds = No
     unique_tile = get_hv(example_file)
     data_g = [gdal.BuildVRT('', [gdal.Open(temp1%(glob.glob(f_temp%(year, doy, tile))[0], band)) for tile in unique_tile]) for band in bands]
     qa_g   = [gdal.BuildVRT('', [gdal.Open(temp2%(glob.glob(f_temp%(year, doy, tile))[0], band)) for tile in unique_tile]) for band in bands]
+ 
     max_x, max_y = np.array(np.where(reproject_data(example_file, data_g).data)).max(axis=1)
     min_x, min_y = np.array(np.where(reproject_data(example_file, data_g).data)).min(axis=1)
+    xoff,  yoff  =min_y, min_x
+    xsize, ysize = (max_y - min_y + 1), (max_x - min_x + 1)
     
+    g.ReadAsArray(xoff, yoff, xsize, ysize)[Lx-yoff, Ly-xoff]
+
+
+
+
+
 
 
     p     = Pool(len(bands)*2)

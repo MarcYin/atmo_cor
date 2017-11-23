@@ -148,6 +148,12 @@ class solve_aerosol(object):
 
         self.logger.info('Trying to get the aod from ddv method.')
         #try:
+        self._get_ddv_aot(toa, l8, tcwv, tco3, ele_data)
+
+
+
+
+    def _get_ddv_aot(self, toa, l8, tcwv, tco3, ele_data):
 	ndvi_mask = (((toa[5] - toa[2])/(toa[5] + toa[2])) > 0.5) & (toa[5] > 0.01) & (toa[5] < 0.25)
 	if ndvi_mask.sum() < 100:
 	    self.logger.info('No enough DDV found in this sence for aot restieval, and only cams prediction used.') 
@@ -181,8 +187,8 @@ class solve_aerosol(object):
 	    min_ind     = np.argmin(costs)
 	    self.logger.info('DDV solved aod is %.02f, and it will used as the mean value of cams prediction.'% p[min_ind])
             self.aot   += (p[min_ind] - self.aot.mean())
-            self.costs = costs
-            self.p     = p
+            #self.costs = costs
+            #self.p     = p
 
     def _ddv_cost(self, aot, blue, red, swif, blue_inputs, red_inputs,  blue_emus, red_emus):
         blue_inputs[3, :] = aot

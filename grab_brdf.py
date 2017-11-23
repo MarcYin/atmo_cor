@@ -2,9 +2,10 @@ import sys
 sys.path.insert(0, 'python')
 import gdal
 import kernels
+import numpy as np
 from osgeo import osr
 from functools import partial
-from multiprocessing import Pool
+from multi_process import parmap
 from reproject import reproject_data
 from datetime import datetime, timedelta
 
@@ -20,18 +21,14 @@ def r_modis(fname, xoff = None, yoff = None, xsize = None, ysize = None):
         if x_off is None:
             return g.ReadAsArray()
         elif g.RasterCount==1:
-            return g.ReadAsArray(xoff, yoff, xsize, ysize)[Lx-yoff, Ly-xoff]
+            return g.ReadAsArray(xoff, yoff, xsize, ysize)
         elif g.RasterCount>1:
             for band in range(g.RasterCount):
                 band += 1
-                rets.append(g.GetRasterBand(band).ReadAsArray(xoff, yoff, xsize, ysize)[Lx-yoff, Ly-xoff])
+                rets.append(g.GetRasterBand(band).ReadAsArray(xoff, yoff, xsize, ysize))
             return np.array(rets)
         else:
             raise IOError
-
-
-
-
 
 def mtile_cal(lat, lon):
     # a function calculate the tile number for MODIS, based on the lat and lon
@@ -40,15 +37,14 @@ def mtile_cal(lat, lon):
     modis_sinu = osr.SpatialReference() # define the SpatialReference object
     modis_sinu.ImportFromProj4 ( \
                     "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +a=6371007.181 +b=6371007.181 +units=m +no_defs")
-    tx = transform( wgs84, modis_sinu)# from wgs84 to modis 
+    tx = osr.CoordinateTransformation( wgs84, modis_sinu)# from wgs84 to modis 
     ho,vo,z = tx.TransformPoint(lon, lat)# still use the function instead of using the equation....
     h = int((ho-m_y0)/(2400*y_step))
     v = int((vo-m_x0)/(2400*x_step))
     return h,v
 
-
 def get_hv(example_file):
-    g = gdal.Open(H_res_fname)
+    g = gdal.Open(example_file)
     geo_t = g.GetGeoTransform()
     x_size, y_size = g.RasterYSize, g.RasterXSize
 
@@ -78,29 +74,40 @@ def get_hv(example_file):
     unique_tile = np.unique(np.array(tiles))
     return unique_tile
 
-def get_brdf_six(example_file, year, doy, root, angles, bands = (7,), Linds = None, do_unc = True):
-    f_temp = root + 'MCD43A1.A%d%03d.%s.006*.hdf'
+def get_brdf_six(MCD43_dir, example_file, year, doy, angles, bands = (7,), Linds = None, do_unc = True):
+    f_temp = MCD43_dir + '/MCD43A1.A%s.%s.006*.hdf'
     temp1  = 'HDF4_EOS:EOS_GRID:"%s":MOD_Grid_BRDF:BRDF_Albedo_Parameters_Band%d'
     temp2  = 'HDF4_EOS:EOS_GRID:"%s":MOD_Grid_BRDF:BRDF_Albedo_Band_Mandatory_Quality_Band%d'
-    unique_tile = get_hv(example_file)
-    data_g = [gdal.BuildVRT('', [gdal.Open(temp1%(glob.glob(f_temp%(year, doy, tile))[0], band)) for tile in unique_tile]) for band in bands]
-    qa_g   = [gdal.BuildVRT('', [gdal.Open(temp2%(glob.glob(f_temp%(year, doy, tile))[0], band)) for tile in unique_tile]) for band in bands]
- 
-    max_x, max_y = np.array(np.where(reproject_data(example_file, data_g).data)).max(axis=1)
-    min_x, min_y = np.array(np.where(reproject_data(example_file, data_g).data)).min(axis=1)
-    xoff,  yoff  =min_y, min_x
+    
+    max_x, max_y = np.array(np.where(temp_data)).max(axis=1)
+    min_x, min_y = np.array(np.where(temp_data)).min(axis=1)
+    xoff,  yoff  = min_y, min_x
     xsize, ysize = (max_y - min_y + 1), (max_x - min_x + 1)
     
-    g.ReadAsArray(xoff, yoff, xsize, ysize)[Lx-yoff, Ly-xoff]
+    unique_tile = get_hv(example_file)
+    date   = datetime.strptime('%d%03d'%(year, doy), '%Y%j')
+    days   = [(date - timedelta(days = i)).strftime('%Y%j') for i in np.arange(16, 0, -1)] + \
+             [(date + timedelta(days = i)).strftime('%Y%j') for i in np.arange(0, 17,  1)]
+    data_f = [[temp1%(glob.glob(f_temp%(day, tile))[0], band) for tile in unique_tile] for day in days for band in bands]  
+    qa_f   = [[temp2%(glob.glob(f_temp%(day, tile))[0], band) for tile in unique_tile] for day in days for band in bands]
+
+    driver = gdal.GetDriverByName('MEM')
+    g = gdal.Open(example_file)
+    ds = driver.Create('', 10980, 10980, 1, gdal.GDT_Byte)
+    ds.SetProjection(g.GetProjection())
+    ds.SetGeoTransform(g.GetGeoTransform())
+    ds.GetRasterBand(1).WriteArray(np.ones((10980, 10980)))
+    temp_data = reproject_data(ds, gdal.BuildVRT('', data_f[0])).data
+    f = lambda fname: gdal.BuildVRT('', fname).ReadAsArray(xoff, yoff, xsize, ysize)
+    data = np.array(parmap(f, data_f)).reshape(len(bands), len(days), 3, ysize, xsize)
+    qa   = np.array(parmap(f, qa_f  )).reshape(len(bands), len(days),    ysize, xsize)
+    w = 0.618034 ** qa.astype(float)
+    f = lambda band: np.array(smoothn(data[band[0],:,band[1],:,:], s=2.5, smoothOrder=1, axis=0, TolZ=0.001, verbose=True, isrobust=True, W = w[band[0]])[0])
+    ba = np.array([np.tile(range(len(bands)), 3), np.repeat(range(3), len(bands))]).T
+    ret = parmap(f, ba)
 
 
 
-
-
-
-
-    p     = Pool(len(bands)*2)
-    fnames = [temp1%(fname, band) for band in bands] + [temp2%(fname, band) for band in bands]
     kk = get_kk(angles)
     k_vol = kk.Ross
     k_geo = kk.Li

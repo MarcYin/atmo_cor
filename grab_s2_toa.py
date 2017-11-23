@@ -219,6 +219,7 @@ class read_s2(object):
 			mva[int(i.attrib['bandId'])] = float(i.find('AZIMUTH_ANGLE').text)
         sza  = np.array(sza).astype(float)
         saa  = np.array(saa).astype(float)
+        saa[saa>180] = saa[saa>180] - 360
         mask = np.isnan(sza)
         sza  = griddata(np.array(np.where(~mask)).T, sza[~mask], \
                        (np.repeat(range(23), 23).reshape(23,23), \
@@ -269,10 +270,11 @@ class read_s2(object):
             g_vaa = griddata(np.array(np.where(~mask)).T, vaa[band][~mask], \
                             (np.repeat(range(23), 23).reshape(23,23), \
                              np.tile  (range(23), 23).reshape(23,23)), method='nearest') 
-	    self.vza[band]  = np.repeat(np.repeat(g_vza, 500, axis = 0), 500, axis = 1)[:10980, :10980]
-	    self.vaa[band]  = np.repeat(np.repeat(g_vaa, 500, axis = 0), 500, axis = 1)[:10980, :10980]
-	    self.mvz[band]  = mvz_[band]
-	    self.mva[band]  = mva_[band]
+	    self.vza[band]   = np.repeat(np.repeat(g_vza, 500, axis = 0), 500, axis = 1)[:10980, :10980]
+            g_vaa[g_vaa>180] = g_vaa[g_vaa>180] - 360
+	    self.vaa[band]   = np.repeat(np.repeat(g_vaa, 500, axis = 0), 500, axis = 1)[:10980, :10980]
+	    self.mvz[band]   = mvz_[band]
+	    self.mva[band]   = mva_[band]
 	self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
                        'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
 
@@ -294,7 +296,7 @@ class read_s2(object):
             f = lambda fn: reproject_data(fn, self.s2_file_dir+'/B04.jp2').data
             ret = parmap(f, fname)
             for i,angs in enumerate(ret):
-                angs[0][angs[0]<0] = (36000 + angs[0][angs[0]<0])
+                #angs[0][angs[0]<0] = (36000 + angs[0][angs[0]<0])
                 angs = angs.astype(float)/100.
                 if slic is None:
                     self.vaa[bands[i]] = angs[0]

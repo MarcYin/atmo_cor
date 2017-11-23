@@ -42,7 +42,7 @@ class solve_aerosol(object):
                  s2_psf      = None,
                  qa_thresh   = 255,
                  aero_res    = 3050, # resolution for aerosol retrival in meters should be larger than 500
-                 reconstruct_s2_angle = True):
+                 reconstruct_s2_angle = False):
 
         self.year        = year 
         self.month       = month
@@ -137,20 +137,6 @@ class solve_aerosol(object):
 								 self.num_blocks, self.block_size), axis = (3,1))
 	self.tcwv_unc              = np.nanmax (tcwv_unc.reshape(self.num_blocks, self.block_size, \
 								 self.num_blocks, self.block_size), axis = (3,1))
-    def _get_psf(self, selected_img):
-        self.s2_logger.info('No PSF parameters specified, start solving.')
-        high_img    = np.repeat(np.repeat(selected_img['B11'], 2, axis=0), 2, axis=1)*0.0001
-        high_indexs = self.Hx, self.Hy
-        low_img     = self.s2_boa[4]
-        qa, cloud   = self.s2_boa_qa[4], self.s2.cloud
-        psf         = psf_optimize(high_img, high_indexs, low_img, qa, cloud, 2)
-        xs, ys      = psf.fire_shift_optimize()
-        xstd, ystd  = 29.75, 39
-        ang         = 0
-        self.s2_logger.info('Solved PSF parameters are: %.02f, %.02f, %d, %d, %d, and the correlation is: %f.' \
-                             %(xstd, ystd, 0, xs, ys, 1-psf.costs.min()))
-        return xstd, ystd, ang, xs, ys
-
     def _s2_aerosol(self,):
         
         self.s2_logger.propagate = False
@@ -158,7 +144,6 @@ class solve_aerosol(object):
         self.s2 = read_s2(self.s2_toa_dir, self.s2_tile, self.year, self.month, self.day, self.s2_u_bands)
         self.s2_logger.info('Reading in TOA reflectance.')
 	selected_img = self.s2.get_s2_toa() 
-        self.s2_file_dir = self.s2.s2_file_dir
 	self.s2.get_s2_cloud()
         self.s2_logger.info('Loading emulators.')
         self._load_xa_xb_xc_emus()
@@ -200,6 +185,7 @@ class solve_aerosol(object):
 	    s2_boa, s2_boa_qa, brdf_std = get_brdf_six(mcd43_file, angles=[vza, sza, raa],\
                                                        bands=(3,4,1,2,6,7), Linds= [Lx, Ly])
             boas.append(s2_boa); boa_qas.append(s2_boa_qa); brdf_stds.append(brdf_std)
+        del sza; del vza; del saa; del vaa; del raa
 	self.s2_boa    = np.hstack(boas)
 	self.s2_boa_qa = np.hstack(boa_qas)
 	self.brdf_stds = np.hstack(brdf_stds)
@@ -208,7 +194,6 @@ class solve_aerosol(object):
                                   np.array(self.s2_spectral_transform)[1,:-1][...,None]
 	self.Hx  = np.hstack(Hxs)
         self.Hy  = np.hstack(Hys)
-        del sza; del vza; del saa; del vaa; del raa; del mask; del boas; del boa_qas; del brdf_stds; del Hxs; del Hys
         shape = (self.num_blocks, self.s2.angles['sza'].shape[0] / self.num_blocks, \
                  self.num_blocks, self.s2.angles['sza'].shape[1] / self.num_blocks)
         self.sza = self.s2.angles['sza'].reshape(shape).mean(axis = (3, 1))
@@ -246,7 +231,7 @@ class solve_aerosol(object):
         except:
 	    self.s2_logger.warning('Getting tcwv from the emulation of sen2cor look up table failed, ECMWF data used.')
 	    self.tcwv     = tcwv
-            self.tcwv_unc = np.ones(self.tcwv.shape) * 0.2
+        self.tcwv_unc = np.ones(self.tcwv.shape) * 0.2
         
         self.s2_logger.info('Trying to get the aot from ddv method.')
         try:
@@ -260,9 +245,20 @@ class solve_aerosol(object):
             self.s2_logger.warning('Getting aot from ddv failed.')
         self.s2_logger.info('Applying PSF model.')
         if self.s2_psf is None:
-            xstd, ystd, ang, xs, ys = self._get_psf(selected_img)
+            self.s2_logger.info('No PSF parameters specified, start solving.')
+            high_img    = np.repeat(np.repeat(selected_img['B11'], 2, axis=0), 2, axis=1)*0.0001
+            high_indexs = self.Hx, self.Hy
+            low_img     = self.s2_boa[4]
+            qa, cloud   = self.s2_boa_qa[4], self.s2.cloud
+            psf         = psf_optimize(high_img, high_indexs, low_img, qa, cloud, 2)
+            xs, ys      = psf.fire_shift_optimize()
+            xstd, ystd  = 29.75, 39
+            ang         = 0
+            self.s2_logger.info('Solved PSF parameters are: %.02f, %.02f, %d, %d, %d, and the correlation is: %f.' \
+                                 %(xstd, ystd, 0, xs, ys, 1-psf.costs.min()))
         else:
             xstd, ystd, ang, xs, ys = self.s2_psf
+        del hig_img; del self.s2.angles; del self.s2.sza; del self.s2.saa; del s2
         # apply psf shifts without going out of the image extend  
         shifted_mask = np.logical_and.reduce(((self.Hx+int(xs)>=0),
                                               (self.Hx+int(xs)<self.full_res[0]), 
@@ -290,13 +286,11 @@ class solve_aerosol(object):
         border_mask[[0, -1], :] = True
         border_mask[:, [0, -1]] = True
         self.bad_pixs = cloud_dilation(self.s2.cloud | border_mask, iteration= ker_size/2)[self.Hx, self.Hy]
-        del selected_img; del self.s2.selected_img; del self.s2.angles['vza']; del self.s2.angles['vaa']
-        del self.s2.angles['sza']; del self.s2.angles['saa']; del self.s2.sza; del self.s2.saa; del self.s2
+        del selected_img; del self.s2.selected_img;
         ker = self.gaussian(xstd, ystd, ang) 
         f   = lambda img: signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]*0.0001 
-        half = parmap(f,imgs[:3])
-        self.s2_toa = np.array(half + parmap(f,imgs[3:]))
-        del imgs
+        self.s2_toa = np.array(parmap(f,imgs))
+        #del imgs
         # get the valid value masks
         qua_mask = np.all(self.s2_boa_qa <= self.qa_thresh, axis = 0)
         boa_mask = np.all(~self.s2_boa.mask,axis = 0 ) &\
@@ -382,7 +376,7 @@ class solve_aerosol(object):
         self.num_blocks = int(np.ceil(self.full_res[0]/self.block_size)) 
         self.solved     = self._s2_aerosol()[0].reshape(3, self.num_blocks, self.num_blocks)
         self.s2_logger.info('Finished retrieval and saving them into local files.')
-        g = gdal.Open(self.s2_file_dir+'/B04.jp2')
+        g = gdal.Open(self.s2.s2_file_dir+'/B04.jp2')
         xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
         projection = g.GetProjection()
         para_names = 'aot', 'tcwv', 'tco3'
@@ -390,7 +384,7 @@ class solve_aerosol(object):
             xres, yres = self.block_size*10, self.block_size*10
             geotransform = (xmin, xres, 0, ymax, 0, -yres)
             nx, ny = self.num_blocks, self.num_blocks
-            dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2_file_dir + \
+            dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir + \
                                           '/%s.tif'%para_names[i], ny, nx, 1, gdal.GDT_Float32)
             dst_ds.SetGeoTransform(geotransform)   
             dst_ds.SetProjection(projection) 

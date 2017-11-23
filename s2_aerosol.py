@@ -392,7 +392,7 @@ class solve_aerosol(object):
                                          np.where(~np.isnan(tco3_map), tco3_map, np.nanmean(tco3_map))
         para_names = 'aot', 'tcwv', 'tco3'
          
-        g = gdal.Open(self.s2.s2_file_dir+'/B04.jp2')
+        g = gdal.Open(self.s2_file_dir+'/B04.jp2')
         xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]
         projection = g.GetProjection()
         
@@ -404,7 +404,7 @@ class solve_aerosol(object):
             xres, yres = self.block_size*10, self.block_size*10
             geotransform = (xmin, xres, 0, ymax, 0, -yres)
             nx, ny = smed.shape
-            dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir + \
+            dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2_file_dir + \
                                           '/%s.tif'%para_names[i], ny, nx, 1, gdal.GDT_Float32)
             dst_ds.SetGeoTransform(geotransform)   
             dst_ds.SetProjection(projection) 
@@ -412,7 +412,7 @@ class solve_aerosol(object):
             dst_ds.FlushCache()                     
             dst_ds = None
             results.append(smed)
-        self.aod550_map, self.tcwv_map, self.tco3_map = results
+        self.aot_map, self.tcwv_map, self.tco3_map = results
 
         # solve by block
     def _s2_block_solver(self, block):
@@ -430,8 +430,10 @@ class solve_aerosol(object):
             return [i,j,[prior, 0], prior]
         else:
 	    boa, toa  = self.s2_boa[:, block_mask], self.s2_toa[:, block_mask]
-	    vza, sza  = self.s2_angles[:2,:, block_mask]*np.pi/180. 
+	    vza, sza  = np.deg2rad(self.s2_angles[:2,:, block_mask])
 	    vaa, saa  = self.s2_angles[2:,:, block_mask]
+            vaa[vaa>180] = vaa[vaa>180] - 360 # due to the inputs range of azimuth angles
+            saa[saa>180] = saa[saa>180] - 360
 	    boa_qa    = self.s2_boa_qa[:, block_mask]
 	    elevation = self.elevation[block_mask]
             brdf_std  = self.brdf_stds[:,block_mask]   

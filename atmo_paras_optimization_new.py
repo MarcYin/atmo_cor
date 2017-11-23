@@ -30,7 +30,7 @@ class solving_atmo_paras(object):
                  emulators, 
                  band_indexs,
                  band_wavelength,
-                 gamma = 1.,
+                 gamma = 10.,
                  alpha = -1.42,
                  subsample = 1,
                  subsample_start = 0

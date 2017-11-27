@@ -14,7 +14,6 @@ class reproject_data(object):
     def __init__(self, source_img,
                  target_img   = None,
                  dstSRS       = None,
-                 srcNodata    = np.nan,
                  outputType   = None,
                  verbose      = False,
                  (xmin, xmax) = (None, None),
@@ -25,8 +24,7 @@ class reproject_data(object):
         self.target_img = target_img
         self.verbose    = verbose
         self.dstSRS     = dstSRS
-        self.srcNodata  = srcNodata
-        self.outputType = gdal.GDT_Unknown if outputType is None else outputType
+        self.outputType = outputType
         self.xmin       = xmin
         self.xmax       = xmax
         self.ymin       = ymin
@@ -50,13 +48,13 @@ class reproject_data(object):
             dstSRS     = osr.SpatialReference( )
             raster_wkt = g.GetProjection()
             dstSRS.ImportFromWkt(raster_wkt)
-            self.g = gdal.Warp('', self.source_img, format = 'MEM', outputBounds = [xmin, ymin, xmax, ymax], dstNodata=np.nan, \
-                               xRes = xRes, yRes = yRes, dstSRS = dstSRS, outputType = self.outputType, srcNodata = self.srcNodata)
+            self.g = gdal.Warp('', self.source_img, format = 'MEM', outputBounds = [xmin, ymin, xmax, ymax], \
+                                    xRes = xRes, yRes = yRes, dstSRS = dstSRS, outputType = self.outputType)
             
         else:
             self.g = gdal.Warp('', self.source_img, format = 'MEM', outputBounds = [self.xmin, self.ymin, \
                                self.xmax, self.ymax], xRes = self.xRes, yRes = self.yRes, dstSRS = self.dstSRS,\
-                               copyMetadata=True, outputType = self.outputType, dstNodata=np.nan, srcNodata = self.srcNodata)
+                               copyMetadata=True, outputType = self.outputType)
         if self.g.RasterCount <= 3:
             self.data = self.g.ReadAsArray()
             #return self.data

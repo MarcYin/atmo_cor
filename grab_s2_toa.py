@@ -240,10 +240,13 @@ class read_s2(object):
 	    band_vaa[:] = np.nan
 	    band_vza[:] = np.nan
 	    for j in dete_id:
-		good = ~np.isnan(vaa[(i,j)])
-		band_vaa[good] = vaa[(i,j)][good]
-		good = ~np.isnan(vza[(i,j)])
-		band_vza[good] = vza[(i,j)][good]
+                try:
+		    good = ~np.isnan(vaa[(i,j)])
+		    band_vaa[good] = vaa[(i,j)][good]
+		    good = ~np.isnan(vza[(i,j)])
+		    band_vza[good] = vza[(i,j)][good]
+                except:
+                    pass 
 	    bands_vaa.append(band_vaa)
 	    bands_vza.append(band_vza)
 	bands_vaa, bands_vza = np.array(bands_vaa), np.array(bands_vza)

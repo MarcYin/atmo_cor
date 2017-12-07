@@ -15,25 +15,31 @@ class psf_optimize(object):
 		 low_img,
                  qa,
                  cloud,
-                 qa_thresh):
+                 qa_thresh,
+                 xstd = 29.75,
+                 ystd = 39,
+                 scale=0.95607605898444503,
+                 offset=0.0086119174434039214):
        self.high_img    = high_img
        self.Hx, self.Hy = high_indexs
        self.low_img     = low_img
        self.cloud       = cloud
        self.qa_thresh   = qa_thresh
        self.qa          = qa
+       self.xstd        = xstd
+       self.ystd        = ystd
        self.shape       = self.high_img.shape
        self.parameters  = ['xstd', 'ystd', 'angle', 'xs', 'ys']
-       self.slop        = 0.95607605898444503
-       self.off         = 0.0086119174434039214
+       self.slop        = scale
+       self.off         = offset
     def _preprocess(self,):
      
-        size = 2*int(round(1.96*39))# set the largest possible PSF size
+        size = 2*int(round(1.96*self.ystd))# set the largest possible PSF size
         self.high_img[0,:]=self.high_img[-1,:]=self.high_img[:,0]=self.high_img[:,-1]= -9999
         self.bad_pixs = cloud_dilation( (self.high_img <= 0) | self.cloud  | (self.high_img >= 1), iteration=size/2)
 
-        xstd, ystd = 29.75, 39
-        ker = self.gaussian(xstd, ystd, 0)
+        #xstd, ystd = 29.75, 39
+        ker = self.gaussian(self.xstd, self.ystd, 0)
         self.conved = signal.fftconvolve(self.high_img, ker, mode='same')
 
         l_mask = (~self.low_img.mask) & (self.qa<=self.qa_thresh)

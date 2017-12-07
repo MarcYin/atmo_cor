@@ -490,7 +490,7 @@ def Fit_Time( ul_x, ul_y, Obs ):
 				rmsfit += dt*dt
 		if numobs > 0:
 			rmsfit = sqrt(rmsfit / numobs)
-			print 'Time fit for band ',band,' RMS = ',rmsfit,' seconds'
+			#print 'Time fit for band ',band,' RMS = ',rmsfit,' seconds'
 
 	return Time_Parms
 
@@ -530,7 +530,7 @@ def Fit_Orbit( AngleObs ):
 	orbtol = 1.0
 	orbrss = 1000.0
 	first_iter = 0
-	print 'Reconstructing Orbit from View Angles'
+	#print 'Reconstructing Orbit from View Angles'
 	while rmstime > convtol or orbrss > orbtol:
 		AngResid = 0.0
 		Omega0 = asin( sin( Orbit[0] ) / sin( Orbit[3] ) )
@@ -585,15 +585,15 @@ def Fit_Orbit( AngleObs ):
 		X0[3,0] *= Orbit[2]
 		orbrss = sqrt( X0[0,0]*X0[0,0] + X0[1,0]*X0[1,0] + X0[2,0]*X0[2,0] + X0[3,0]*X0[3,0] )
 
-	print 'Lat    = ', Orbit[0]*todeg
-	print 'Lon    = ', Orbit[1]*todeg
-	print 'Radius = ', Orbit[2]
-	print 'Incl   = ', Orbit[3]*todeg
-	print 'RMS Orbit Fit (meters): ', orbrss
-	print 'RMS Time Fit (seconds): ', rmstime
-	print 'RMS LOS Residual: ', AngResid
+	#print 'Lat    = ', Orbit[0]*todeg
+	#print 'Lon    = ', Orbit[1]*todeg
+	#print 'Radius = ', Orbit[2]
+	#print 'Incl   = ', Orbit[3]*todeg
+	#print 'RMS Orbit Fit (meters): ', orbrss
+	#print 'RMS Time Fit (seconds): ', rmstime
+	#print 'RMS LOS Residual: ', AngResid
 
-	print 'Fitting Tile Observation Times'
+	#print 'Fitting Tile Observation Times'
 
 	Time_Parms = Fit_Time( ul_x, ul_y, Obs )
 
@@ -662,7 +662,7 @@ gsd = [ 60, 10, 10, 10, 20, 20, 20, 10, 20, 60, 60, 20, 20 ]
 subsamp = 10
 if len(sys.argv) > 2:
 	subsamp = int( sys.argv[2] );
-print 'Using subsampling factor of %d.' % subsamp
+#print 'Using subsampling factor of %d.' % subsamp
 
 
 # Sudipta spatial subset setting
@@ -683,7 +683,7 @@ if len(sys.argv) > 3: # expect spatial subset bbox coords as <ullat,ullon,lrlat,
 # Load the angle observations from the metadata
 (Tile_ID, AngleObs) = get_angleobs( XML_File )
 Tile_Base = Tile_ID.split('.')
-print 'Loaded view angles from metadata for tile: ',Tile_ID.split('_')[-2][1:] + '_T_' + (Tile_ID.split('_')[-4]).split('T')[0] 
+#print 'Loaded view angles from metadata for tile: ',Tile_ID.split('_')[-2][1:] + '_T_' + (Tile_ID.split('_')[-4]).split('T')[0] 
 
 # Reconstruct the Orbit from the Angles
 (Orbit, TimeParms) = Fit_Orbit( AngleObs )
@@ -692,11 +692,11 @@ Orbit.append( Omega0 )
 Lon0 = Orbit[1] - asin( tan( Orbit[0] ) / -tan( Orbit[3] ) )
 Orbit.append( Lon0 )
 
-print 'Orbit processing complete'
+#print 'Orbit processing complete'
 
 # Load the detector footprints
 BandFoot = get_detfootprint( XML_File )
-print 'Loaded detector footprints from QI files'
+#print 'Loaded detector footprints from QI files'
 
 # Loop through the bands using TimeParms which are in band order
 def loop(tparms, AngleObs, gsd, subsamp, BandFoot, Orbit,  XML_File, sul_lat,sul_lon,slr_lat,slr_lon):
@@ -729,7 +729,7 @@ def loop(tparms, AngleObs, gsd, subsamp, BandFoot, Orbit,  XML_File, sul_lat,sul
 	    lr_s_r = out_rows
 	    lr_s_c = out_cols
     
-    print "ul_s_r = {}, ul_s_c = {}, lr_s_r = {}, lr_s_c = {}".format(ul_s_r, ul_s_c, lr_s_r, lr_s_c)
+    #print "ul_s_r = {}, ul_s_c = {}, lr_s_r = {}, lr_s_c = {}".format(ul_s_r, ul_s_c, lr_s_r, lr_s_c)
     #sys.exit(0)
     #######################################################
     ## Sudipta addition to support spatial subset
@@ -746,7 +746,7 @@ def loop(tparms, AngleObs, gsd, subsamp, BandFoot, Orbit,  XML_File, sul_lat,sul
 	    if foot['bandId'] == band:
 		    detId = foot['detId']
 		    bandName = foot['bandName']
-		    print 'Scanning band ', band, ' detector ', detId
+		    #print 'Scanning band ', band, ' detector ', detId
 		    minloc = [ foot['coords'][0][0], foot['coords'][0][1] ]
 		    maxloc = [ foot['coords'][0][0], foot['coords'][0][1] ]
 		    for pointloc in foot['coords']:

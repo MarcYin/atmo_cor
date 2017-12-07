@@ -109,13 +109,13 @@ def get_kk(angles):
                          doIntegrals=False,LiType='Sparse',RossType='Thick')
     return kk
 
-def MCD43_SurRef(MCD43_dir, example_file, year, doy, ang_files, sun_view_ang_scale=[1,1], bands = (7,), tolz = 0.001, reproject=False):
+def MCD43_SurRef(MCD43_dir, example_file, year, doy, ang_files, sun_view_ang_scale=[1,1], bands = (7,), tolz = 0.001):
     f_temp = MCD43_dir + '/MCD43A1.A%s.%s.006*.hdf'
     temp1  = 'HDF4_EOS:EOS_GRID:"%s":MOD_Grid_BRDF:BRDF_Albedo_Parameters_Band%d'
     temp2  = 'HDF4_EOS:EOS_GRID:"%s":MOD_Grid_BRDF:BRDF_Albedo_Band_Mandatory_Quality_Band%d'
     
     unique_tile = get_hv(example_file)
-    #print unique_tile
+    print unique_tile
     date   = datetime.strptime('%d%03d'%(year, doy), '%Y%j')
     days   = [(date - timedelta(days = i)).strftime('%Y%j') for i in np.arange(16, 0, -1)] + \
              [(date + timedelta(days = i)).strftime('%Y%j') for i in np.arange(0, 17,  1)]
@@ -124,55 +124,37 @@ def MCD43_SurRef(MCD43_dir, example_file, year, doy, ang_files, sun_view_ang_sca
     fnames = np.array([[[temp1%(glob.glob(f_temp%(day, tile))[0], band), \
                          temp2%(glob.glob(f_temp%(day, tile))[0], band)] for \
                          tile in unique_tile] for band in bands for day in days]).transpose(0,2,1)
-    g       = gdal.Open(example_file)
-    mg      = reproject_data(example_file, gdal.BuildVRT('', list(fnames[0,0])), outputType = gdal.GDT_Float64).g
-    temp_data = ~np.isnan(mg.ReadAsArray())
-    geotransform = mg.GetGeoTransform() 
-    xgeo = geotransform[0] + np.arange(0.5, mg.RasterXSize, 1) * geotransform[1]
-    ygeo = geotransform[3] + np.arange(0.5, mg.RasterYSize, 1) * geotransform[5]
-    xgeo = np.repeat(xgeo[None,...], mg.RasterYSize, axis=0)
-    ygeo = np.repeat(ygeo[...,None], mg.RasterXSize, axis=1)
-    m_proj = modis_sinu = osr.SpatialReference()
-    m_proj.ImportFromProj4("+proj=sinu +lon_0=0 +x_0=0 +y_0=0 +a=6371007.181 +b=6371007.181 +units=m +no_defs")
-    h_proj = osr.SpatialReference() 
-    h_proj.ImportFromWkt(gdal.Open(example_file).GetProjection())
-    h_xgeo, h_ygeo, _ = np.array(osr.CoordinateTransformation(m_proj, h_proj).TransformPoints(zip(xgeo[temp_data], ygeo[temp_data]))).T
-    geotransform = g.GetGeoTransform()
-    hy = ((h_xgeo - geotransform[0])/geotransform[1]).astype(int)
-    hx = ((h_ygeo - geotransform[3])/geotransform[5]).astype(int)
-    hmask = (hx>=0) & (hx<10980) & (hy>=0) & (hy<10980)
-    hy = hy[hmask]
-    hx = hx[hmask]
-    #print 'got vrt'
+    g      = gdal.Open(example_file)
+    temp_data = ~np.isnan(reproject_data(example_file, gdal.BuildVRT('', list(fnames[0,0])), outputType = gdal.GDT_Float64).data)
+    print 'got vrt'
     max_x, max_y = np.array(np.where(temp_data)).max(axis=1)
     min_x, min_y = np.array(np.where(temp_data)).min(axis=1)
     xoff,  yoff  = min_y, min_x
     xsize, ysize = (max_y - min_y + 1), (max_x - min_x + 1)
-    #print 'read in data'
+    print 'read in data'
     f = lambda fname: [gdal.BuildVRT('', list(fname[0])).ReadAsArray(xoff, yoff, xsize, ysize), \
                        gdal.BuildVRT('', list(fname[1])).ReadAsArray(xoff, yoff, xsize, ysize)]
     #f      = lambda fname: gdal.BuildVRT('', fname).ReadAsArray(xoff, yoff, xsize, ysize)
     data, qa = np.array(parmap(f, fnames)).T
     data   = np.concatenate(data).reshape((len(bands), len(days), 3, ysize, xsize)).astype(float)
     data   = np.ma.array(data, mask = (data==32767)).astype(float)
-    w      = 0.618034**np.concatenate(qa).reshape(len(bands), len(days), ysize, xsize).astype(float)
-    #w      = 0.618034 ** qa.astype(float)
-    f      = lambda band: np.array(smoothn(data[band[0],:,band[1],:,:], s=10., smoothOrder=1., \
-                                   axis=0, TolZ=tolz, verbose=False, isrobust=True, W = w[band[0]]))[[0,3],]
-    ba     = np.array([np.tile(range(len(bands)), 3), np.repeat(range(3), len(bands))]).T
-    #print 'smoothing....'
-    smed   = np.array(parmap(f, ba))
-    dat    = np.concatenate(smed[:,0], axis=0).reshape(3, len(bands), len(days), ysize, \
-                            xsize)[:,:,16, np.where(temp_data)[0]-min_x, np.where(temp_data)[1]-min_y]
-    wei    = np.concatenate(smed[:,1], axis=0).reshape(3, len(bands), len(days), ysize, \
-                            xsize)[:,:,16, np.where(temp_data)[0]-min_x, np.where(temp_data)[1]-min_y]
-    #std    = data.std(axis = 1)[:, :, np.where(temp_data)[0]-min_x, np.where(temp_data)[1]-min_y]
-    #print 'get angles...'
-    sa_files, va_files = ang_files
+    w      = np.repeat(0.618034**np.concatenate(qa).reshape(len(bands), len(days), ysize, xsize).astype(float)[None, ...], 3, axis=0).transpose(1,2,0,3,4)
+    w[w<0.3] = 0. 
+    print 'smoothing....'
+    # instead of doing smoothn, we actually only need a laplace distribution filter for the middle date
+    pdf = np.exp(-abs(np.arange(-16, 17,1)-0.)/40.)/(2*40.)
+    pdf = pdf/pdf.sum()
+    w   = w*pdf[None,..., None, None, None]
+    
+    dat = ((w * data).sum(axis=1)/w.sum(axis=1))[:, :, np.where(temp_data)[0]-min_x, np.where(temp_data)[1]-min_y]
+    wei    = w[:,16, 0, np.where(temp_data)[0]-min_x, np.where(temp_data)[1]-min_y]/pdf[16]
+    std    = data.std(axis = 1)[:, :, np.where(temp_data)[0]-min_x, np.where(temp_data)[1]-min_y]
+    print 'get angles...'
+    va_files, sa_files = ang_files
     if isinstance(va_files[0], str):
         f   = lambda ang_file: reproject_data(ang_file, gdal.BuildVRT('', list(fnames[0,0])), outputType = gdal.GDT_Float64).data
         vas = np.array(parmap(f, va_files))
-    elif isinstance(va_files[0], (np.ndarray, np.generic) ):
+    elif isinstance(sa_files[0], (np.ndarray, np.generic) ):
         f   = lambda array: reproject_data(array_to_raster(array, example_file), gdal.BuildVRT('', list(fnames[0,0])), outputType = gdal.GDT_Float64).data
         vas =  np.array(parmap(f, list(va_files)))
     vas = vas * sun_view_ang_scale[1]
@@ -193,49 +175,37 @@ def MCD43_SurRef(MCD43_dir, example_file, year, doy, ang_files, sun_view_ang_sca
     kk      = get_kk(angles)
     k_vol   = kk.Ross
     k_geo   = kk.Li
-    sur_ref = (dat[0] + dat[1]*k_vol + dat[2]*k_geo)*0.001
+    sur_ref = (dat[:, 0] + dat[:, 1]*k_vol + dat[:, 2]*k_geo)*0.001
     wei     = 0.05 / wei
-    #print wei
-    unc     = np.sqrt(wei[0, :, :]**2 + (wei[1, :, :]**2)*k_vol**2 + (wei[2, :, :]**2)*k_geo**2)
-    #unc     = np.sqrt((np.sqrt(std[:, 0, :]**2 + (std[:, 1, :]**2)*k_vol**2 + (std[:, 2, :]**2)*k_geo**2) * 0.001)**2 + \
-    #                  (np.sqrt(wei[0, :, :]**2 + (wei[1, :, :]**2)*k_vol**2 + (wei[2, :, :]**2)*k_geo**2))**2) 
-    unc     = np.minimum(unc, 0.16)
-    #print unc
-    if reproject:
-        f_dat   = np.repeat(temp_data[None, ...], len(bands), axis=0).astype(float)
-        f_dat[:]= np.nan 
-        unc_dat = f_dat.copy() 
-	f_dat  [:, temp_data] = sur_ref
-	unc_dat[:, temp_data] = unc
-	f       = lambda array: reproject_data(array_to_raster(array, gdal.BuildVRT('', list(fnames[0,0]))), example_file, outputType = gdal.GDT_Float32).data
-	f_dat   = np.array(parmap(f, list(f_dat)))
-	unc_dat = np.array(parmap(f, list(unc_dat))) 
-	mask    = np.isnan(unc_dat) | (f_dat < 0.00001)
-	f_dat[mask]   = np.nan
-	unc_dat[mask] = np.nan
-        unc_dat[unc_dat==0] = 0.16
-        return f_dat, unc_dat
-    else:
-        lx, ly                = np.where(temp_data)
-        sur_ref[sur_ref.mask] = np.nan
-        unc[unc.mask]         = 0.16
-        return sur_ref.data[:,hmask], unc.data[:,hmask], hx, hy, lx[hmask], ly[hmask], fnames[0,0]
+    print wei.T
+    unc     = np.sqrt((np.sqrt(std[:, 0, :]**2 + (std[:, 1, :]**2)*k_vol**2 + (std[:, 2, :]**2)*k_geo**2) * 0.001)**2 + wei**2) 
+    unc     = np.minimum(unc, 0.5)
+    print unc
+    f_dat   = np.repeat(temp_data[None, ...], len(bands), axis=0).astype(float)
+    f_dat[:]= np.nan 
+    unc_dat = f_dat.copy() 
+    f_dat  [:, temp_data] = sur_ref
+    unc_dat[:, temp_data] = unc
+    f       = lambda array: reproject_data(array_to_raster(array, gdal.BuildVRT('', list(fnames[0,0]))), example_file, outputType = gdal.GDT_Float32).data
+    f_dat   = np.array(parmap(f, list(f_dat)))
+    unc_dat = np.array(parmap(f, list(unc_dat))) 
+    mask    = np.isnan(unc_dat) | (f_dat < 0.00001)
+    f_dat[mask]   = np.nan
+    unc_dat[mask] = np.nan
+    return f_dat, unc_dat
 
 if __name__ == '__main__':
-    from datetime import datetime
-    example_file = '/store/S2_data/50/S/LH/2016/9/10/0/B04.jp2'
-    date = datetime.strptime('/'.join(example_file.split('/')[-5:-2]), '%Y/%m/%d')
-    doy = date.timetuple().tm_yday  
+    example_file = '/store/S2_data/50/S/LH/2017/2/24/0/B04.jp2'
     mcd43_dir = '/data/selene/ucfajlg/Hebei/MCD43/'
     bands = [3,4,1, 2, 6,7]
     va_files  = ['/'.join(example_file.split('/')[:-1]) + '/angles/VAA_VZA_B%02d.img'%i for i in [2,3,4,8,11,12]]
     sza = np.zeros((10980, 10980))
     saa = sza.copy()
     from grab_s2_toa import read_s2
-    s2 = read_s2('/store/S2_data/', '50SLH', date.year, date.month, date.day, bands = ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'] )
+    s2 = read_s2('/store/S2_data/', '50SLH', 2017, 2, 24, bands = ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'] )
     s2.get_s2_angles()
     sa_files = [s2.angles['saa'], s2.angles['sza']]
-    ret = MCD43_SurRef(mcd43_dir, example_file, date.year, doy, [sa_files, va_files], sun_view_ang_scale=[1.,0.01], bands = bands, reproject=False)
+    f_data, unc_data = MCD43_SurRef(mcd43_dir, example_file, 2017, 55, [va_files, sa_files], sun_view_ang_scale=[1.,0.01], bands = bands)
 
 
 

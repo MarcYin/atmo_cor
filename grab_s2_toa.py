@@ -88,13 +88,13 @@ class read_s2(object):
             try:
                 self.cirrus = gdal.Rasterize("", self.s2_file_dir+ "/qi/MSK_CLOUDS_B00.gml", \
                                              format="MEM", xRes=xRes, yRes=yRes, where="maskType='CIRRUS'", \
-                                             outputBounds=[xmin, ymin, xmax, ymax], noData=0, burnValues=1).ReadAsArray()
+                                             outputBounds=[xmin, ymin, xmax, ymax], noData=np.nan, burnValues=1).ReadAsArray()
             except:
                 self.cirrus = np.zeros((x_size, y_size)).astype(bool)
             try:
                 self.cloud  = gdal.Rasterize("", self.s2_file_dir+ "/qi/MSK_CLOUDS_B00.gml", \
                                              format="MEM", xRes=xRes, yRes=yRes, where="maskType='OPAQUE'", \
-                                             outputBounds=[xmin, ymin, xmax, ymax], noData=0, burnValues=2).ReadAsArray()
+                                             outputBounds=[xmin, ymin, xmax, ymax], noData=np.nan, burnValues=2).ReadAsArray()
             except:
                 self.cloud  = np.zeros((x_size, y_size)).astype(bool)
             cloud_mask  = self.cirrus + self.cloud
@@ -115,6 +115,7 @@ class read_s2(object):
                                    '/cloud.tif').ReadAsArray()
         self.cirrus = (cloud_mask == 1)
         self.cloud  = (cloud_mask >= 2)
+        self.cloud[:] = False
         self.cloud_cover = 1.*(self.cloud==2)/self.cloud.size
 
 
@@ -282,34 +283,37 @@ class read_s2(object):
                        'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
 
         if reconstruct:
-            if len(glob(self.s2_file_dir + '/angles/VAA_VZA_*.img')) == 13:
-                pass
-            else:
-                #print 'Reconstructing Sentinel 2 angles...'
-                subprocess.call(['python', './python/s2a_angle_bands_mod.py', \
-                                  self.s2_file_dir+'/metadata.xml',  '10'])
+            try:
+		if len(glob(self.s2_file_dir + '/angles/VAA_VZA_*.img')) == 13:
+		    pass
+		else:
+		    #print 'Reconstructing Sentinel 2 angles...'
+		    subprocess.call(['python', './python/s2a_angle_bands_mod.py', \
+				      self.s2_file_dir+'/metadata.xml',  '10'])
 
-	    if self.bands is None:
-		bands = self.s2_bands
-	    else:
-		bands = self.bands
+		if self.bands is None:
+		    bands = self.s2_bands
+		else:
+		    bands = self.bands
 
-            self.vaa = {}; self.vza = {}
-            fname = [self.s2_file_dir+'/angles/VAA_VZA_%s.img'%band for band in bands]
-            f = lambda fn: reproject_data(fn, self.s2_file_dir+'/B04.jp2').data
-            ret = parmap(f, fname)
-            for i,angs in enumerate(ret):
-                #angs[0][angs[0]<0] = (36000 + angs[0][angs[0]<0])
-                angs = angs.astype(float)/100.
-                if slic is None:
-                    self.vaa[bands[i]] = angs[0]
-                    self.vza[bands[i]] = angs[1]
-                else:
-                    x_ind, y_ind = np.array(slic)
-                    self.vaa[bands[i]] = angs[0][x_ind, y_ind]
-                    self.vza[bands[i]] = angs[1][x_ind, y_ind]
-            self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
-                           'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
+		self.vaa = {}; self.vza = {}
+		fname = [self.s2_file_dir+'/angles/VAA_VZA_%s.img'%band for band in bands]
+		f = lambda fn: reproject_data(fn, self.s2_file_dir+'/B04.jp2', outputType= gdal.GDT_Float32).data
+		ret = parmap(f, fname)
+		for i,angs in enumerate(ret):
+		    #angs[0][angs[0]<0] = (36000 + angs[0][angs[0]<0])
+		    angs = angs.astype(float)/100.
+		    if slic is None:
+			self.vaa[bands[i]] = angs[0]
+			self.vza[bands[i]] = angs[1]
+		    else:
+			x_ind, y_ind = np.array(slic)
+			self.vaa[bands[i]] = angs[0][x_ind, y_ind]
+			self.vza[bands[i]] = angs[1][x_ind, y_ind]
+		self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
+      			       'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
+            except:
+                print 'Reconstruct failed and original angles are used.'
 
 if __name__ == '__main__':
     

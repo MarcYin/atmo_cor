@@ -27,7 +27,7 @@ class atmospheric_correction(object):
                  s2_toa_dir  = '/home/ucfafyi/DATA/S2_MODIS/s_data/',
                  global_dem  = '/home/ucfafyi/DATA/Multiply/eles/global_dem.vrt',
                  emus_dir    = '/home/ucfafyi/DATA/Multiply/emus/',
-                 reconstruct_s2_angle = False
+                 reconstruct_s2_angle = True
                  ):              
         
         self.year        = year
@@ -73,15 +73,14 @@ class atmospheric_correction(object):
         all_refs = self.s2.get_s2_toa()
         self.logger.info('Reading in the angles')
         self.s2.get_s2_angles(self.reconstruct_s2_angle)
-        all_angs = self.s2.angles
-        self.sza,self.saa = all_angs['sza'], all_angs['saa']
+        self.sza,self.saa = self.s2.angles['sza'], self.s2.angles['saa']
         
         self.logger.info('Doing 10 meter bands')
         self._10meter_ref = np.array([all_refs[band].astype(float)/10000. for band \
                                       in ['B02', 'B03', 'B04', 'B08']])
-        self._10meter_vza = np.array([all_angs['vza'][band] for band
+        self._10meter_vza = np.array([self.s2.angles['vza'][band] for band
                                       in ['B02', 'B03', 'B04', 'B08']])
-        self._10meter_vaa = np.array([all_angs['vaa'][band] for band
+        self._10meter_vaa = np.array([self.s2.angles['vaa'][band] for band
                                       in ['B02', 'B03', 'B04', 'B08']])
         self.logger.info('Getting control variables for 10 meters bands.')
         self._10meter_aod, self._10meter_tcwv, self._10meter_tco3,\
@@ -97,25 +96,24 @@ class atmospheric_correction(object):
                              self.saa, self._10meter_vaa, self._10meter_aod,\
                              self._10meter_tcwv, self._10meter_tco3, self._10meter_ele,\
                              self._10meter_band_indexs)     
-        self.toa_rgb = clip(self._10meter_ref[[2,1,0], ...].transpose(1,2,0)*255/0.25, 0., 255.).astype(uint8)
-        self.boa_rgb = clip(self.boa         [[2,1,0], ...].transpose(1,2,0)*255/0.25, 0., 255.).astype(uint8)
+        self.toa_rgb = clip(self._10meter_ref[[2,1,0], ...].transpose(1,2,0)*255/0.255, 0., 255.).astype(uint8)
+        self.boa_rgb = clip(self.boa         [[2,1,0], ...].transpose(1,2,0)*255/0.255, 0., 255.).astype(uint8)
         self._save_rgb(self.toa_rgb, 'TOA_RGB.tif', self.s2.s2_file_dir+'/B04.jp2')
         self._save_rgb(self.boa_rgb, 'BOA_RGB.tif', self.s2.s2_file_dir+'/B04.jp2')
-
 
         del self._10meter_ref; del self._10meter_vza; del self._10meter_vaa; del self._10meter_aod; \
         del self._10meter_tcwv; del self._10meter_tco3; del self._10meter_ele
         
-	self.sur_refs.update(dict(zip(['B02', 'B03', 'B04', 'B08'], self.boa)))
+	#self.sur_refs.update(dict(zip(['B02', 'B03', 'B04', 'B08'], self.boa)))
         self._save_img(self.boa, ['B02', 'B03', 'B04', 'B08']); del self.boa 
 	  
         self.logger.info('Doing 20 meter bands')
         self._20meter_ref = np.array([all_refs[band].astype(float)/10000. for band \
                                       in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']])
 
-        self._20meter_vza = np.array([all_angs['vza'][band] for band \
+        self._20meter_vza = np.array([self.s2.angles['vza'][band] for band \
                                       in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']]).reshape(6, 5490, 2, 5490, 2).mean(axis=(4,2))
-        self._20meter_vaa = np.array([all_angs['vaa'][band] for band \
+        self._20meter_vaa = np.array([self.s2.angles['vaa'][band] for band \
                                       in ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']]).reshape(6, 5490, 2, 5490, 2).mean(axis=(4,2))
 
         self._20meter_sza = self.sza.reshape(5490, 2, 5490, 2).mean(axis=(3, 1))
@@ -142,16 +140,16 @@ class atmospheric_correction(object):
         del self._20meter_ref; del self._20meter_vza; del self._20meter_vaa;  del self._20meter_sza
         del self._20meter_saa; del self._20meter_aod; del self._20meter_tcwv; del self._20meter_tco3; del self._20meter_ele
 
-        self.sur_refs.update(dict(zip(['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'], self.boa)))
+        #self.sur_refs.update(dict(zip(['B05', 'B06', 'B07', 'B8A', 'B11', 'B12'], self.boa)))
         self._save_img(self.boa, ['B05', 'B06', 'B07', 'B8A', 'B11', 'B12']); del self.boa
 
 
         self.logger.info('Doing 60 meter bands')
         self._60meter_ref = np.array([all_refs[band].astype(float)/10000. for band \
                                       in ['B01', 'B09', 'B10']])
-        self._60meter_vza = np.array([all_angs['vza'][band] for band \
+        self._60meter_vza = np.array([self.s2.angles['vza'][band] for band \
                                       in ['B01', 'B09', 'B10']]).reshape(3, 1830, 6, 1830, 6).mean(axis=(4, 2))
-        self._60meter_vaa = np.array([all_angs['vaa'][band] for band \
+        self._60meter_vaa = np.array([self.s2.angles['vaa'][band] for band \
                                       in ['B01', 'B09', 'B10']]).reshape(3, 1830, 6, 1830, 6).mean(axis=(4, 2))
         self._60meter_sza = self.sza.reshape(1830, 6, 1830, 6).mean(axis=(3,1))
         self._60meter_saa = self.saa.reshape(1830, 6, 1830, 6).mean(axis=(3,1))
@@ -174,9 +172,9 @@ class atmospheric_correction(object):
         del self._60meter_ref; del self._60meter_vza; del self._60meter_vaa;  del self._60meter_sza
         del self._60meter_saa; del self._60meter_aod; del self._60meter_tcwv; del self._60meter_tco3; del self._60meter_ele
 
-        self.sur_refs.update(dict(zip(['B01', 'B09', 'B10'], self.boa)))
+        #self.sur_refs.update(dict(zip(['B01', 'B09', 'B10'], self.boa)))
         self._save_img(self.boa, ['B01', 'B09', 'B10']); del self.boa
-        del all_refs; del self.s2.selected_img; del all_angs; del self.s2.angles
+        del all_refs; del self.s2.selected_img; del self.s2.angles 
         self.logger.info('Done!')
 
     def _save_rgb(self, rgb_array, name, source_image):
@@ -216,14 +214,14 @@ class atmospheric_correction(object):
     def get_control_variables(self, target_band):
 
 	aod = reproject_data(self.s2.s2_file_dir+'/aot.tif', \
-                             self.s2.s2_file_dir+'/%s.jp2'%target_band).data
+                             self.s2.s2_file_dir+'/%s.jp2'%target_band, outputType= gdal.GDT_Float32).data
 
         tcwv = reproject_data(self.s2.s2_file_dir+'/tcwv.tif', \
-                              self.s2.s2_file_dir+'/%s.jp2'%target_band).data
+                              self.s2.s2_file_dir+'/%s.jp2'%target_band, outputType= gdal.GDT_Float32).data
 
         tco3 = reproject_data(self.s2.s2_file_dir+'/tco3.tif', \
-                              self.s2.s2_file_dir+'/%s.jp2'%target_band).data
-        ele = reproject_data(self.global_dem, self.s2.s2_file_dir+'/%s.jp2'%target_band).data
+                              self.s2.s2_file_dir+'/%s.jp2'%target_band, outputType= gdal.GDT_Float32).data
+        ele = reproject_data(self.global_dem, self.s2.s2_file_dir+'/%s.jp2'%target_band, outputType= gdal.GDT_Float32).data
         mask = ~np.isfinite(ele)
         ele[mask] = np.interp(np.flatnonzero(mask), \
                               np.flatnonzero(~mask), ele[~mask]) # simple interpolation
@@ -245,7 +243,7 @@ class atmospheric_correction(object):
         rows              = np.repeat(np.arange(self._num_blocks), self._num_blocks)
         columns           = np.tile(np.arange(self._num_blocks), self._num_blocks)
         blocks            = zip(rows, columns)
-        #self._s2_block_correction_emus_xa_xb_xc([0, 0])
+        #self._s2_block_correction_emus_xa_xb_xc([1, 1])
         ret = parmap(self._s2_block_correction_emus_xa_xb_xc, blocks)
         #ret = parmap(self._s2_block_correction_6s, blocks)
         #ret               = parmap(self._s2_block_correction_emus, blocks) 
@@ -295,7 +293,6 @@ class atmospheric_correction(object):
         for bi, band in enumerate(self._band_indexs):    
             p = [self._block_mean(i, self._mean_size).ravel() for i in [np.cos(sza), \
                  np.cos(vza[bi]), np.cos(saa - vaa[bi]), aod, tcwv, tco3, elevation]] 
-
             a = self.xap_emus[band].predict(np.array(p).T)[0].reshape(self._block_size//self._mean_size, \
                                                                       self._block_size//self._mean_size)
             b = self.xbp_emus[band].predict(np.array(p).T)[0].reshape(self._block_size//self._mean_size, \

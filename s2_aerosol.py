@@ -132,7 +132,7 @@ class solve_aerosol(object):
                              np.repeat(np.repeat(selected_img['B09']*0.0001, 6, axis=0), 6, axis=1)[self.Hx, self.Hy]
         wv_emus   = pkl.load(open(self.wv_emus_dir, 'rb'))
 	inputs    = np.array([b9, b8a, vza[-1], sza[-1], abs(raa)[-1], self.elevation]).T
-        tcwv_mask = b8a < 0.1
+        tcwv_mask = b8a < 0.12
 	self.s2_tcwv, self.s2_tcwv_unc, _ = wv_emus.predict(inputs, do_unc = True)
         if tcwv_mask.sum() >= 1:
             self.s2_tcwv[tcwv_mask] = np.interp(np.flatnonzero( tcwv_mask), \
@@ -203,7 +203,7 @@ class solve_aerosol(object):
         self.s2_boa = self.s2_boa*np.array(self.s2_spectral_transform)[0,:-1][...,None] + \
                                   np.array(self.s2_spectral_transform)[1,:-1][...,None]
         self.s2_logger.info('Getting elevation.')
-        ele_data = reproject_data(self.global_dem, self.s2.s2_file_dir+'/B04.jp2').data
+        ele_data = reproject_data(self.global_dem, self.s2.s2_file_dir+'/B04.jp2', outputType= gdal.GDT_Float32).data
         mask = ~np.isfinite(ele_data)
         ele_data = np.ma.array(ele_data, mask = mask)/1000.
         self.elevation = ele_data[self.Hx, self.Hy]
@@ -338,7 +338,7 @@ class solve_aerosol(object):
 	    offset  = sub.GetOffset()
 	    scale   = sub.GetScale()
 	    bad_pix = int(sub.GetNoDataValue())
-	    rep_g   = reproject_data(g, example_file).g
+	    rep_g   = reproject_data(g, example_file, outputType= gdal.GDT_Float32).g
 	    data    = rep_g.GetRasterBand(ind+1).ReadAsArray()
 	    data    = data*scale + offset
 	    mask    = (data == (bad_pix*scale + offset))

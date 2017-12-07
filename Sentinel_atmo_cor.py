@@ -1,6 +1,6 @@
 #/usr/bin/env python
 import sys
-from s2_aerosol import solve_aerosol
+from s2_aerosolNew import solve_aerosol
 from s2_correction import atmospheric_correction
 file_path = sys.argv[1]
 s2_toa_dir = '/'.join(file_path.split('/')[:-8])

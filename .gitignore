@@ -8,5 +8,6 @@
 *.hdf
 *.egg-info/
 *.iml
+*.pdf
 .ipynb_checkpoints/
 

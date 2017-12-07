@@ -70,6 +70,7 @@ class read_l8(object):
         toa          = np.array(parmap(gdal_reader, self.toa_file)).astype(float) * \
                                 bands_scale[...,None, None] + bands_offset[...,None, None]
         self._get_qa()
+        self._get_angles()
         toa      = toa / np.cos(np.deg2rad(self.sza))
         toa_mask = toa < 0
         mask     = self.qa_mask | toa_mask | self.ang_mask
@@ -101,7 +102,7 @@ class read_l8(object):
 
     def _get_qa(self,):
         bqa = gdal_reader(self.qa_file)
-        self.qa_mask = (bqa & 31).astype(bool)
+        self.qa_mask = ~((bqa >= 2720) & (bqa <= 2732))
 if __name__ == '__main__':
     l8 = read_l8('/home/ucfafyi/DATA/S2_MODIS/l_data/', (123, 34), 2017, 4, 21, bands=[2,3,4,5,6,7])
-    toa = l8._get_toa()
+    #toa = l8._get_toa()

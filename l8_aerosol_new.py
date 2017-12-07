@@ -119,6 +119,7 @@ class solve_aerosol(object):
         else:
             f = np.load(self.l8_toa_dir + 'MCD43_%s.npz'%l8.header)
             boa, unc, hx, hy, lx, ly, flist = f['boa'], f['unc'], f['hx'], f['hy'], f['lx'], f['ly'], f['flist']
+        self.Hx, self.Hy = hx, hy
         self.logger.info('Applying spectral transform.')
         self.boa = boa*np.array(self.spectral_transform)[0][...,None, None] + \
                        np.array(self.spectral_transform)[1][...,None, None]
@@ -145,13 +146,14 @@ class solve_aerosol(object):
         self.logger.info('Applying PSF model.')
         if self.l8_psf is None:
             self.logger.info('No PSF parameters specified, start solving.')
+            
             high_indexs   = np.where((~toa[-2].mask[::10,::10]) & (~np.isnan(self.boa[-2])[::10,::10]))
             self.high_img = toa[-2][::10,::10]
             self.high_indexs = high_indexs
             low_img     = np.ma.array(self.boa[-2][::10,::10][high_indexs[0], high_indexs[1]])
             qa, cloud   = self.unc[-2][::10,::10][high_indexs[0], high_indexs[1]], l8.qa_mask[::10,::10]
             #toa[-1][~l8.qa_mask] = np.nan
-            psf         = psf_optimize(toa[-2][::10,::10].data, high_indexs, low_img, qa, cloud, qa_thresh=0.08, xstd=12., ystd= 20., \
+            psf         = psf_optimize(toa[-2][::10,::10].data, high_indexs, low_img, qa, cloud, qa_thresh=0.1, xstd=12., ystd= 20., \
                                        scale = self.spectral_transform[0][-2], offset=self.spectral_transform[1][-2])
             xs, ys      = psf.fire_shift_optimize()
             xstd, ystd  = 12., 20.

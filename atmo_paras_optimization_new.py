@@ -30,8 +30,9 @@ class solving_atmo_paras(object):
                  emulators, 
                  band_indexs,
                  band_wavelength,
-                 gamma = 0.5,
-                 alpha = -1.42,
+                 pix_res = 10.,
+                 gamma   = 0.5,
+                 alpha   = -1.42,
                  subsample = 1,
                  subsample_start = 0
                  ):
@@ -60,55 +61,57 @@ class solving_atmo_paras(object):
         self.alpha           = alpha
         self.band_weights    = (np.array(band_wavelength)/1000.)**self.alpha
         self.band_weights    = self.band_weights / self.band_weights.sum() 
+        self.pix_res         = pix_res
         self.subsample       = subsample
         self.subsample_start = subsample_start
  
     def _pre_process(self,):
-        self.block_size = int(self.aero_res/10.)
-        self.num_blocks = int(self.full_res[0]/(self.block_size))
+        self.block_size   = 1. * self.aero_res/self.pix_res
+        self.num_blocks_x = np.ceil(self.full_res[0]/(self.block_size))
+        self.num_blocks_y = np.ceil(self.full_res[1]/(self.block_size))
         try:
-            zero_aod  = np.zeros((self.num_blocks, self.num_blocks))
-            zero_tcwv = np.zeros((self.num_blocks, self.num_blocks))
-            zero_tco3 = np.zeros((self.num_blocks, self.num_blocks))
-            self.control_variables = np.zeros((self.boa.shape[0], 7, self.num_blocks, self.num_blocks))
+            zero_aod  = np.zeros((self.num_blocks_x, self.num_blocks_y))
+            zero_tcwv = np.zeros((self.num_blocks_x, self.num_blocks_y))
+            zero_tco3 = np.zeros((self.num_blocks_x, self.num_blocks_y))
+            self.control_variables = np.zeros((self.boa.shape[0], 7, self.num_blocks_x, self.num_blocks_y))
             if self.vza.ndim == 2:
                 for i, parameter in enumerate([self.sza, self.vza, self.raa, zero_aod, zero_tcwv, zero_tco3, self.ele]):
-                    if parameter.shape != (self.num_blocks, self.num_blocks):
+                    if parameter.shape != (self.num_blocks_x, self.num_blocks_y):
                         self.control_variables[:, i, :, :] = self._block_resample(parameter)
                     else:
                         self.control_variables[:, i, :, :] = parameter
             elif self.vza.ndim == 3:
                 for j in range(len(self.vza)):
                     for i, parameter in enumerate([self.sza, self.vza[j], self.raa[j], zero_aod, zero_tcwv, zero_tco3, self.ele]):
-                        if parameter.shape != (self.num_blocks, self.num_blocks):
+                        if parameter.shape != (self.num_blocks_x, self.num_blocks_y):
                             self.control_variables[j, i, :, :] = self._block_resample(parameter)
                         else:
                             self.control_variables[j, i, :, :] = parameter
             else:
-                raise IOError('Angles should be a 2D array.')
+                raise IOError('Angles should be 2D arrays.')
         except:
             raise IOError('Check the shape of input angles and elevation.') 
         try:
-            self.prior_uncs = np.zeros((3, self.num_blocks * self.num_blocks))
+            self.prior_uncs = np.zeros((3, self.num_blocks_x * self.num_blocks_y))
             for i, parameter in enumerate([self.aod_unc, self.tcwv_unc, self.tco3_unc]):
-                if  parameter.shape != (self.num_blocks, self.num_blocks):
+                if  parameter.shape != (self.num_blocks_x, self.num_blocks_y):
                     self.prior_uncs[i]     = self._block_resample(parameter).ravel()
                 else:
                     self.prior_uncs[i]     = parameter.ravel()
         except:
             raise IOError('Check the shape of input uncertainties.')
         try:
-            self.priors = np.zeros((3, self.num_blocks * self.num_blocks))
+            self.priors = np.zeros((3, self.num_blocks_x * self.num_blocks_y))
             for i, parameter in enumerate([self.aod_prior, self.tcwv_prior, self.tco3_prior]):
-                if  parameter.shape != (self.num_blocks, self.num_blocks):
+                if  parameter.shape != (self.num_blocks_x, self.num_blocks_y):
                     self.priors[i]   = self._block_resample(parameter).ravel()
                 else:
                     self.priors[i]   = parameter.ravel()
         except:
             raise IOError('Check the shape of input uncertainties.')
 
-        self.resample_hx = (1. * self.Hx / self.full_res[0] * self.num_blocks).astype(int)
-        self.resample_hy = (1. * self.Hy / self.full_res[1] * self.num_blocks).astype(int)
+        self.resample_hx = (1. * self.Hx / self.full_res[0] * self.num_blocks_x).astype(int)
+        self.resample_hy = (1. * self.Hy / self.full_res[1] * self.num_blocks_y).astype(int)
         self.xap_emus    = self.emus[0][self.band_indexs]
         self.xbp_emus    = self.emus[1][self.band_indexs]
         self.xcp_emus    = self.emus[2][self.band_indexs]
@@ -116,16 +119,16 @@ class solving_atmo_paras(object):
         self.bot_bounds  = self.xap_emus[0].inputs[:,3:6].min(axis=0)
         #self.uncs        = self.uncs  [:, self.resample_hx, self.resample_hx]
         #self.priors      = self.priors[:, self.resample_hx, self.resample_hx]
-        y                = np.zeros((self.num_blocks, self.num_blocks))
+        y                = np.zeros((self.num_blocks_x, self.num_blocks_y))
         self.diff        = fastDiff(y,axis=(0,),gamma = self.gamma) 
        
     def _block_resample(self, parameter):
-        hx = np.repeat(range(self.num_blocks), self.num_blocks)
-        hy = np.tile  (range(self.num_blocks), self.num_blocks)
+        hx = np.repeat(range(self.num_blocks_x), self.num_blocks_y)
+        hy = np.tile  (range(self.num_blocks_y), self.num_blocks_x)
         x_size, y_size = parameter.shape
-        resample_x = (1.* hx / self.num_blocks*x_size).astype(int)
-        resample_y = (1.* hy / self.num_blocks*y_size).astype(int)
-        resampled_parameter = parameter[resample_x, resample_y].reshape(self.num_blocks, self.num_blocks)
+        resample_x = (1.* hx / self.num_blocks_x*x_size).astype(int)
+        resample_y = (1.* hy / self.num_blocks_y*y_size).astype(int)
+        resampled_parameter = parameter[resample_x, resample_y].reshape(self.num_blocks_x, self.num_blocks_y)
         return resampled_parameter
 
     def _obs_cost(self, p, is_full = True):
@@ -137,20 +140,20 @@ class solving_atmo_paras(object):
           
         for i in range(len(self.xap_emus)):
             H, dH   = self.xap_emus[i].predict(X[i].T, do_unc=False) 
-            H, dH   = np.array(H).reshape(self.num_blocks, self.num_blocks), \
-                      np.array(dH)[:,3:6].reshape(self.num_blocks, self.num_blocks, 3)
+            H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
+                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
             xap_H. append(H [self.resample_hx,self.resample_hy])
             xap_dH.append(dH[self.resample_hx,self.resample_hy,:])
 
             H, dH   = self.xbp_emus[i].predict(X[i].T, do_unc=False) 
-            H, dH   = np.array(H).reshape(self.num_blocks, self.num_blocks), \
-                      np.array(dH)[:,3:6].reshape(self.num_blocks, self.num_blocks, 3)
+            H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
+                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
             xbp_H. append(H [self.resample_hx,self.resample_hy])
             xbp_dH.append(dH[self.resample_hx,self.resample_hy,:])
 
             H, dH   = self.xcp_emus[i].predict(X[i].T, do_unc=False) 
-            H, dH   = np.array(H).reshape(self.num_blocks, self.num_blocks), \
-                      np.array(dH)[:,3:6].reshape(self.num_blocks, self.num_blocks, 3)
+            H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
+                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
             xcp_H. append(H [self.resample_hx,self.resample_hy])
             xcp_dH.append(dH[self.resample_hx,self.resample_hy,:])
         #import pdb;pdb.set_trace()
@@ -169,8 +172,8 @@ class solving_atmo_paras(object):
             dJ = np.array(full_dJ).sum(axis=(1,))
             J_ = np.zeros((3,) + self.full_res)
             J_[:, self.Hx, self.Hy] = dJ
-            J_ = J_.reshape(3, self.num_blocks, self.block_size, \
-                               self.num_blocks, self.block_size).sum(axis=(4,2))
+            J_ = J_.reshape(3, self.num_blocks_x, self.block_size, \
+                               self.num_blocks_y, self.block_size).sum(axis=(4,2))
             J_ = J_.reshape(3, -1)
         else:
             J_ = np.array(full_dJ).sum(axis=(1, 2))
@@ -178,7 +181,7 @@ class solving_atmo_paras(object):
          
     def _smooth_cost(self, p, is_full=True):
         p = np.array(p).reshape(3, -1)
-        aod, tcwv, tco3 = np.array(p).reshape(3, self.num_blocks, self.num_blocks)
+        aod, tcwv, tco3 = np.array(p).reshape(3, self.num_blocks_x, self.num_blocks_y)
         J_aod,  J_aod_  = self.diff.cost_der_cost(aod)
         J_tcwv, J_tcwv_ = self.diff.cost_der_cost(tcwv)
         J_tco3, J_tco3_ = self.diff.cost_der_cost(tco3)

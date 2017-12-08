@@ -155,6 +155,8 @@ def MCD43_SurRef(MCD43_dir, example_file, year, doy, ang_files, sun_view_ang_sca
     data, qa = np.array(parmap(f, fnames)).T
     data   = np.concatenate(data).reshape((len(bands), len(days), 3, ysize, xsize)).astype(float)
     data   = np.ma.array(data, mask = (data==32767)).astype(float)
+    #test1, test2 = data.copy(), qa.copy()
+    #global test1; global test2
     w      = 0.618034**np.concatenate(qa).reshape(len(bands), len(days), ysize, xsize).astype(float)
     #w      = 0.618034 ** qa.astype(float)
     f      = lambda band: np.array(smoothn(data[band[0],:,band[1],:,:], s=10., smoothOrder=1., \
@@ -162,6 +164,7 @@ def MCD43_SurRef(MCD43_dir, example_file, year, doy, ang_files, sun_view_ang_sca
     ba     = np.array([np.tile(range(len(bands)), 3), np.repeat(range(3), len(bands))]).T
     #print 'smoothing....'
     smed   = np.array(parmap(f, ba))
+    #global smed
     dat    = np.concatenate(smed[:,0], axis=0).reshape(3, len(bands), len(days), ysize, \
                             xsize)[:,:,16, np.where(temp_data)[0]-min_x, np.where(temp_data)[1]-min_y]
     wei    = np.concatenate(smed[:,1], axis=0).reshape(3, len(bands), len(days), ysize, \
@@ -223,7 +226,7 @@ def MCD43_SurRef(MCD43_dir, example_file, year, doy, ang_files, sun_view_ang_sca
 
 if __name__ == '__main__':
     from datetime import datetime
-    example_file = '/store/S2_data/50/S/LH/2016/9/10/0/B04.jp2'
+    example_file = '/store/S2_data/50/S/MG/2016/1/24/0/B04.jp2'
     date = datetime.strptime('/'.join(example_file.split('/')[-5:-2]), '%Y/%m/%d')
     doy = date.timetuple().tm_yday  
     mcd43_dir = '/data/selene/ucfajlg/Hebei/MCD43/'
@@ -232,7 +235,8 @@ if __name__ == '__main__':
     sza = np.zeros((10980, 10980))
     saa = sza.copy()
     from grab_s2_toa import read_s2
-    s2 = read_s2('/store/S2_data/', '50SLH', date.year, date.month, date.day, bands = ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'] )
+    tile =''.join(example_file.split('/')[-8:-5])
+    s2 = read_s2('/store/S2_data/', tile, date.year, date.month, date.day, bands = ['B02', 'B03', 'B04', 'B08', 'B11', 'B12'] )
     s2.get_s2_angles()
     sa_files = [s2.angles['saa'], s2.angles['sza']]
     ret = MCD43_SurRef(mcd43_dir, example_file, date.year, doy, [sa_files, va_files], sun_view_ang_scale=[1.,0.01], bands = bands, reproject=False)

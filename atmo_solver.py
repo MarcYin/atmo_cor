@@ -25,14 +25,15 @@ class solving_atmo_paras(object):
                  tco3_unc,
                  boa_unc,
                  Hx, Hy,
+                 mask,
                  full_res,
                  aero_res,
                  emulators, 
                  band_indexs,
                  band_wavelength,
                  pix_res = 10.,
-                 gamma   = 0.5,
-                 alpha   = -1.42,
+                 gamma   = 0.1,
+                 alpha   = -1.6,# from nasa modis climatology
                  subsample = 1,
                  subsample_start = 0
                  ):
@@ -53,6 +54,7 @@ class solving_atmo_paras(object):
         self.tco3_unc        = tco3_unc
         self.boa_unc         = boa_unc
         self.Hx, self.Hy     = Hx, Hy
+        self.mask            = mask
         self.full_res        = full_res
         self.aero_res        = aero_res
         self.emus            = np.array(emulators)
@@ -69,6 +71,8 @@ class solving_atmo_paras(object):
         self.block_size   = int(np.ceil(1. * self.aero_res / self.pix_res))
         self.num_blocks_x = int(np.ceil(self.full_res[0]/(self.block_size)))
         self.num_blocks_y = int(np.ceil(self.full_res[1]/(self.block_size)))
+        self.mask         = self.mask.reshape(self.num_blocks_x, self.block_size, \
+                                              self.num_blocks_y, self.block_size).astype(int).sum(axis=(3,1)) > 0
         try: 
             #import pdb; pdb.set_trace()
             zero_aod  = np.zeros((self.num_blocks_x, self.num_blocks_y))
@@ -131,40 +135,27 @@ class solving_atmo_paras(object):
         resample_y = (1.* hy / self.num_blocks_y*y_size).astype(int)
         resampled_parameter = parameter[resample_x, resample_y].reshape(self.num_blocks_x, self.num_blocks_y)
         return resampled_parameter
-
+    def _helper(self, inp):
+        H, dH = inp[0].predict(inp[1].T, do_unc=False)
+        H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
+                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
+        return np.hstack([H[self.resample_hx, self.resample_hy][..., None], dH[self.resample_hx, self.resample_hy, :]])
     def _obs_cost(self, p, is_full = True):
         p = np.array(p).reshape(3, -1)
         X = self.control_variables.reshape(self.boa.shape[0], 7, -1)
         X[:, 3:6, :] = np.array(p)
         xap_H,  xbp_H,  xcp_H  = [], [], []
         xap_dH, xbp_dH, xcp_dH = [], [], []
-          
-        for i in range(len(self.xap_emus)):
-            H, dH   = self.xap_emus[i].predict(X[i].T, do_unc=False) 
-            H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
-                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
-            xap_H. append(H [self.resample_hx,self.resample_hy])
-            xap_dH.append(dH[self.resample_hx,self.resample_hy,:])
-
-            H, dH   = self.xbp_emus[i].predict(X[i].T, do_unc=False) 
-            H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
-                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
-            xbp_H. append(H [self.resample_hx,self.resample_hy])
-            xbp_dH.append(dH[self.resample_hx,self.resample_hy,:])
-
-            H, dH   = self.xcp_emus[i].predict(X[i].T, do_unc=False) 
-            H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
-                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
-            xcp_H. append(H [self.resample_hx,self.resample_hy])
-            xcp_dH.append(dH[self.resample_hx,self.resample_hy,:])
-        #import pdb;pdb.set_trace()
-        xap_H,  xbp_H,  xcp_H  = np.array(xap_H),  np.array(xbp_H),  np.array(xcp_H)
-        xap_dH, xbp_dH, xcp_dH = np.array(xap_dH), np.array(xbp_dH), np.array(xcp_dH)
-        
+        emus = list(self.xap_emus) + list(self.xbp_emus) + list(self.xcp_emus)
+        Xs   = list(X)        + list(X)        + list(X)
+        inps = zip(emus, Xs)
+        ret = np.array(parmap(self._helper, inps))
+        xap_H,  xbp_H,  xcp_H  = ret[:, :, 0] .reshape(3, self.boa.shape[0], len(self.resample_hx))
+        xap_dH, xbp_dH, xcp_dH = ret[:, :, 1:].reshape(3, self.boa.shape[0], len(self.resample_hx), 3)
         y        = xap_H * self.toa - xbp_H
         sur_ref  = y / (1 + xcp_H * y) 
         diff     = sur_ref - self.boa
-        J        = (0.5 * self.band_weights[...,None] * (diff)**2 / self.boa_unc**2).sum()
+        J        = np.nansum(0.5 * self.band_weights[...,None] * (diff)**2 / self.boa_unc**2)
         dH       = -1 * (-self.toa[...,None] * xap_dH + xcp_dH * (xbp_H[...,None] - xap_H[...,None] * self.toa[...,None])**2 + \
                          xbp_dH) /(self.toa[...,None] * xap_H[...,None] * xcp_H[...,None] - xbp_H[...,None] * xcp_H[...,None] + 1)**2
         full_dJ  = [ self.band_weights[...,None] * dH[:,:,i] * diff / (self.boa_unc**2) for i in range(3)]
@@ -183,9 +174,9 @@ class solving_atmo_paras(object):
     def _smooth_cost(self, p, is_full=True):
         p = np.array(p).reshape(3, -1)
         aod, tcwv, tco3 = np.array(p).reshape(3, self.num_blocks_x, self.num_blocks_y)
-        J_aod,  J_aod_  = self.diff.cost_der_cost(aod)
-        J_tcwv, J_tcwv_ = self.diff.cost_der_cost(tcwv)
-        J_tco3, J_tco3_ = self.diff.cost_der_cost(tco3)
+        J_aod,  J_aod_  = self.diff.cost_der_cost(aod,  self.mask)
+        J_tcwv, J_tcwv_ = self.diff.cost_der_cost(tcwv, self.mask)
+        J_tco3, J_tco3_ = self.diff.cost_der_cost(tco3, self.mask)
         J, full_dJ      = J_aod + J_tcwv + J_tco3, np.array([J_aod_, J_tcwv_, J_tco3_])
         if is_full:
             J_ = np.array(full_dJ).reshape(3, -1)
@@ -193,10 +184,36 @@ class solving_atmo_paras(object):
             J_ = np.array(full_dJ).reshape(3, -1).sum(axis=(1,))
         return J, J_
 
-    def _prior_cost(self, p, is_full=True):
+    def _new_smooth_cost(self, p, is_full=True):
         p = np.array(p).reshape(3, -1)
-        J = 0.5 * (p - self.priors)**2/self.prior_uncs**2
-        full_dJ = (p - self.priors)/self.prior_uncs**2
+        aod, tcwv, tco3 = np.array(p).reshape(3, self.num_blocks_x, self.num_blocks_y)
+        J_aod,  J_aod_  = self._fit_smoothness(aod,  self.mask, 1. / self.gamma)
+        J_tcwv, J_tcwv_ = self._fit_smoothness(tcwv, self.mask, 1. / self.gamma)
+        J_tco3, J_tco3_ = self._fit_smoothness(tco3, self.mask, 1. / self.gamma)
+        J, full_dJ      = J_aod + J_tcwv + J_tco3, np.array([J_aod_, J_tcwv_, J_tco3_])
+        if is_full:
+            J_ = np.array(full_dJ).reshape(3, -1)
+        else:
+            J_ = np.array(full_dJ).reshape(3, -1).sum(axis=(1,))
+        return J, J_
+
+    def _fit_smoothness (self,  x, mask, sigma_model):
+        # Build up the 8-neighbours
+        hood = np.array ( [  x[:-2, :-2], x[:-2, 1:-1], x[ :-2, 2: ], \
+                         x[ 1:-1,:-2], x[1:-1, 2:], \
+                         x[ 2:,:-2], x[ 2:, 1:-1], x[ 2:, 2:] ] )
+        j_model = 0
+        der_j_model = x*0
+        for i in range(8):
+            j_model = j_model + 0.5*np.sum ( (( hood[i,:,:] - x[1:-1,1:-1] )**2) * mask[1:-1,1:-1])/sigma_model
+            der_j_model[1:-1,1:-1] = der_j_model[1:-1,1:-1] - ( hood[i,:,:] - x[1:-1,1:-1]  )/sigma_model
+        return j_model, 2*der_j_model * mask
+    
+
+    def _prior_cost(self, p, is_full=True):
+        p       = np.array(p).reshape(3, -1)
+        J       = (0.5 * (p - self.priors)**2/self.prior_uncs**2) * np.repeat(self.mask.ravel()[None, ...], 3, axis=0)
+        full_dJ = ((p - self.priors)/self.prior_uncs**2)*np.repeat(self.mask.ravel()[None, ...], 3, axis=0)
         if is_full:
             J_ = np.array(full_dJ)
         else:
@@ -209,7 +226,8 @@ class solving_atmo_paras(object):
         print np.array(p).reshape(3, -1)
         obs_J, obs_J_       = self._obs_cost(p)
         prior_J, prior_J_   = self._prior_cost(p)
-        smooth_J, smooth_J_ = self._smooth_cost(p)
+        #smooth_J, smooth_J_ = self._smooth_cost(p)
+        smooth_J, smooth_J_ = self._new_smooth_cost(p)
         J = obs_J/36. + prior_J + smooth_J
         J_ = (obs_J_/36. +  prior_J_ + smooth_J_).ravel()
         print 'costs: ', obs_J/36., prior_J, smooth_J 
@@ -271,7 +289,8 @@ if __name__ == '__main__':
     emus     = parmap(f, [xap_emu, xbp_emu, xcp_emu])
     band_indexs     = [1, 2, 3, 7, 11, 12]
     band_wavelength = [469, 555, 645, 869, 1640, 2130]
-    
+    mask = np.zeros((10980, 10980)).astype(bool)   
+    mask[1, 1] = True
     aero = solving_atmo_paras(boa, toa,
                               sza, vza,
                               saa, vaa,
@@ -284,6 +303,7 @@ if __name__ == '__main__':
                               tco3_unc,
                               boa_unc,
                               Hx, Hy,
+                              mask,
                               full_res,
                               aero_res,
                               emus,

@@ -19,7 +19,7 @@ from multi_process import parmap
 from reproject import reproject_data
 from grab_brdf import MCD43_SurRef, array_to_raster
 from grab_uncertainty import grab_uncertainty
-from atmo_paras_optimization_new import solving_atmo_paras
+from atmo_solver import solving_atmo_paras
 from spatial_mapping import Find_corresponding_pixels, cloud_dilation
 from emulation_engine import AtmosphericEmulationEngine
 from psf_optimize import psf_optimize
@@ -158,10 +158,10 @@ class solve_aerosol(object):
         temp_data[lx, ly] = boa[5,:]
         self.boa_b12 = reproject_data(array_to_raster(temp_data, g), example_file, outputType = gdal.GDT_Float32).data
         toa_b12      = np.repeat(np.repeat(b12/10000., 2, axis=0), 2, axis=1)
-        mask = abs(self.boa_b12 - toa_b12)>0.1
-        emask = binary_erosion(mask, structure=np.ones((3,3)).astype(bool), iterations=15)
-        dmask = binary_dilation(emask, structure=np.ones((3,3)).astype(bool), iterations=100)
-        self.cloud  = self.s2.cloud | dmask
+        mask         = abs(self.boa_b12 - toa_b12)>0.1
+        emask        = binary_erosion(mask, structure=np.ones((3,3)).astype(bool), iterations=15)
+        dmask        = binary_dilation(emask, structure=np.ones((3,3)).astype(bool), iterations=100)
+        self.cloud   = self.s2.cloud | dmask | (toa_b12 < 0.0001)
         #import pylab as plt
         #plt.imshow(self.cloud)
         #plt.show()
@@ -277,7 +277,8 @@ class solve_aerosol(object):
         border_mask = np.zeros(self.full_res).astype(bool)
         border_mask[[0, -1], :] = True
         border_mask[:, [0, -1]] = True
-        self.bad_pixs = cloud_dilation(self.cloud | border_mask, iteration= ker_size/2)[self.Hx, self.Hy]
+        self.dcloud   = cloud_dilation(self.cloud | border_mask, iteration= ker_size/2)
+        self.bad_pixs = self.dcloud[self.Hx, self.Hy]
         del selected_img; del self.s2.selected_img; del self.s2.angles['vza']; del self.s2.angles['vaa']
         del self.s2.angles['sza']; del self.s2.angles['saa']; del self.s2.sza; del self.s2.saa; del self.s2
         ker = self.gaussian(xstd, ystd, ang) 
@@ -300,6 +301,7 @@ class solve_aerosol(object):
         self.s2_boa     = self.s2_boa   [:, self.s2_mask]
         self.s2_boa_unc = self.s2_boa_qa[:, self.s2_mask]
         self.s2_logger.info('Solving...')
+        mask = binary_dilation(~self.dcloud, structure=np.ones((3,3)).astype(bool)).astype(bool)
         self.aero = solving_atmo_paras(self.s2_boa, 
                                   self.s2_toa,
                                   self.sza, 
@@ -315,6 +317,7 @@ class solve_aerosol(object):
 				  self.tco3_unc,
 				  self.s2_boa_unc,
 				  self.Hx, self.Hy,
+                                  mask,
 				  self.full_res,
 				  self.aero_res,
 				  self.emus,
@@ -386,7 +389,7 @@ class solve_aerosol(object):
         self.aot_map, self.tcwv_map, self.tco3_map = self.solved
 
 if __name__ == "__main__":
-    aero = solve_aerosol( 2016, 1, 24, mcd43_dir = '/data/selene/ucfajlg/Hebei/MCD43/', s2_toa_dir = '/store/S2_data/',\
-                                      emus_dir = '/home/ucfafyi/DATA/Multiply/emus/', s2_tile='50SMG', s2_psf=None)
+    aero = solve_aerosol( 2016, 2, 10, mcd43_dir = '/data/selene/ucfajlg/Hebei/MCD43/', s2_toa_dir = '/store/S2_data/',\
+                                      emus_dir = '/home/ucfafyi/DATA/Multiply/emus/', s2_tile='50SLG', s2_psf=None)
     aero.solving_s2_aerosol()
     #solved  = aero.prepare_modis()

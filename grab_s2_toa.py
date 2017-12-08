@@ -115,7 +115,7 @@ class read_s2(object):
                                    '/cloud.tif').ReadAsArray()
         self.cirrus = (cloud_mask == 1)
         self.cloud  = (cloud_mask >= 2)
-        self.cloud[:] = False
+        #self.cloud[:] = False
         self.cloud_cover = 1.*(self.cloud==2)/self.cloud.size
 
 

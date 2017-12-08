@@ -36,13 +36,13 @@ class psf_optimize(object):
      
         size = 2*int(round(1.96*self.ystd))# set the largest possible PSF size
         self.high_img[0,:]=self.high_img[-1,:]=self.high_img[:,0]=self.high_img[:,-1]= -9999
-        self.bad_pixs = cloud_dilation( (self.high_img <= 0) | self.cloud  | (self.high_img >= 1), iteration=size/2)
+        self.bad_pixs = cloud_dilation( (self.high_img < 0.0001) | self.cloud  | (self.high_img >= 1), iteration=size/2)
 
         #xstd, ystd = 29.75, 39
         ker = self.gaussian(self.xstd, self.ystd, 0)
         self.conved = signal.fftconvolve(self.high_img, ker, mode='same')
 
-        l_mask = (~self.low_img.mask) & (self.qa<=self.qa_thresh)
+        l_mask = (~self.low_img.mask) & (self.qa<self.qa_thresh)
         h_mask =  ~self.bad_pixs[self.Hx, self.Hy]
         self.lh_mask = l_mask & h_mask
 
@@ -109,6 +109,9 @@ class psf_optimize(object):
     def fire_shift_optimize(self,):
         #self.S2_PSF_optimization()
         self._preprocess()
+        if self.lh_mask.sum() ==0:
+            self.costs = np.array([100000000000.,])
+            return 0,0
         min_val = [-50,-50]
         max_val = [50,50]
         ps, distributions = create_training_set([ 'xs', 'ys'], min_val, max_val, n_train=50)
@@ -117,6 +120,8 @@ class psf_optimize(object):
                                            np.array([i[1] for i in self.shift_solved])
 
         xs, ys = self.paras[self.costs==self.costs.min()][0].astype(int)
+        if self.costs.min() == 100000000000.:
+            xs, ys = 0, 0
         #print 'Best shift is ', xs, ys, 'with the correlation of', 1-self.costs.min()
         return xs, ys
 

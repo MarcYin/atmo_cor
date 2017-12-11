@@ -112,7 +112,7 @@ class solve_aerosol(object):
 	solved    = ddv(b2, b4, b8, b12, 'msi', sza, 
 			np.array([blue_vza, red_vza]), 
 			np.array([blue_raa, red_raa]), 
-			self.elevation, self.tcwv, self.tco3, \
+			self.elevation, self.tcwv, self.tco3, ~self.cloud,\
 			red_emus = red_emus, blue_emus = blue_emus)._ddv_prior()      
 	return solved
 
@@ -124,7 +124,7 @@ class solve_aerosol(object):
 	sza, saa  = sza[self.Hx, self.Hy], saa[self.Hx, self.Hy]
 	elevation = ele[self.Hx, self.Hy]
 	inputs    = np.array([b9, b8a, vza, sza, abs(saa-vaa), elevation]).T
-	tcwv_mask = b8a < 0.1 
+	tcwv_mask = ( b8a < 0.1 ) | self.cloud[self.Hx, self.Hy]
 	tcwv      = np.zeros(self.full_res)
 	tcwv[:]   = np.nan
 	tcwv_unc  = tcwv.copy()
@@ -137,14 +137,14 @@ class solve_aerosol(object):
 	self.tcwv                  = np.nanmean(tcwv    .reshape(self.num_blocks, self.block_size, \
 								 self.num_blocks, self.block_size), axis = (3,1))
 	self.tcwv_unc              = np.nanmax (tcwv_unc.reshape(self.num_blocks, self.block_size, \
-								 self.num_blocks, self.block_size), axis = (3,1))
+								 self.num_blocks, self.block_size), axis = (3,1)) + 0.05
     def _get_psf(self, selected_img):
         self.s2_logger.info('No PSF parameters specified, start solving.')
         high_img    = np.repeat(np.repeat(selected_img['B11'], 2, axis=0), 2, axis=1)*0.0001
         high_indexs = self.Hx, self.Hy
         low_img     = np.ma.array(self.s2_boa[4])
         qa, cloud   = self.s2_boa_qa[4], self.cloud
-        psf         = psf_optimize(high_img, high_indexs, low_img, qa, cloud, 0.16)
+        psf         = psf_optimize(high_img, high_indexs, low_img, qa, cloud, 0.1)
         xs, ys      = psf.fire_shift_optimize()
         xstd, ystd  = 29.75, 39
         ang         = 0
@@ -184,7 +184,7 @@ class solve_aerosol(object):
             va_files = [self.s2_file_dir + '/angles/VAA_VZA_B%02d.img'%i for i in [2,3,4,8,11,12]]
         else:
             va_files = [np.array([self.s2.angles['vaa'][band], self.s2.angles['vza'][band]]) for band in self.s2_u_bands[:-2]]
-        if len(glob(self.s2_file_dir + '/MCD43.npz')) == 0:
+        if len(glob(self.s2_file_dir + '/MCD431.npz')) == 0:
             boa, unc, hx, hy, lx, ly, flist = MCD43_SurRef(self.mcd43_dir, self.example_file, \
                                                            self.year, self.doy, [sa_files, va_files],
                                                            sun_view_ang_scale=[1, 0.01], bands = [3,4,1,2,6,7], tolz=0.001, reproject=False)
@@ -227,7 +227,7 @@ class solve_aerosol(object):
         self.tco3       = tco3 * 46.698 #* (1 - 0.05)
         tcwv            = tcwv / 10. 
         self.tco3_unc   = np.ones(self.tco3.shape) * 0.2
-        self.aot_unc    = np.ones(self.aot.shape)  * 0.5
+        self.aot_unc    = np.ones(self.aot.shape)  * 0.8
         
         self.s2_logger.info('Trying to get the tcwv from the emulation of sen2cor look up table.')
         try:
@@ -301,7 +301,7 @@ class solve_aerosol(object):
         self.s2_boa     = self.s2_boa   [:, self.s2_mask]
         self.s2_boa_unc = self.s2_boa_qa[:, self.s2_mask]
         self.s2_logger.info('Solving...')
-        mask = binary_dilation(~self.dcloud, structure=np.ones((3,3)).astype(bool)).astype(bool)
+        mask = ~self.dcloud
         self.aero = solving_atmo_paras(self.s2_boa, 
                                   self.s2_toa,
                                   self.sza, 
@@ -323,7 +323,9 @@ class solve_aerosol(object):
 				  self.emus,
                                   self.band_indexs,
                                   self.boa_bands)
-        solved = self.aero._optimization()
+        solved    = self.aero._optimization()
+        self.mask = mask.reshape(self.num_blocks, self.block_size, \
+                                 self.num_blocks, self.block_size).astype(int).sum(axis=(3,1)) > 0
         return solved
 
     def _read_cams(self, example_file, parameters = ['aod550', 'tcwv', 'gtco3']):
@@ -376,6 +378,9 @@ class solve_aerosol(object):
         projection = g.GetProjection()
         para_names = 'aot', 'tcwv', 'tco3'
         for i,para_map in enumerate(self.solved):
+            g_data = griddata(np.array(np.where(self.mask)).T, para_map[self.mask], \
+                             (np.repeat(range(self.num_blocks), self.num_blocks).reshape(self.num_blocks, self.num_blocks), \
+                              np.tile  (range(self.num_blocks), self.num_blocks).reshape(self.num_blocks, self.num_blocks)), method='nearest')
             xres, yres = self.block_size*10, self.block_size*10
             geotransform = (xmin, xres, 0, ymax, 0, -yres)
             nx, ny = self.num_blocks, self.num_blocks
@@ -383,7 +388,7 @@ class solve_aerosol(object):
                                           '/%s.tif'%para_names[i], ny, nx, 1, gdal.GDT_Float32)
             dst_ds.SetGeoTransform(geotransform)   
             dst_ds.SetProjection(projection) 
-            dst_ds.GetRasterBand(1).WriteArray(para_map)
+            dst_ds.GetRasterBand(1).WriteArray(g_data)
             dst_ds.FlushCache()                     
             dst_ds = None
         self.aot_map, self.tcwv_map, self.tco3_map = self.solved

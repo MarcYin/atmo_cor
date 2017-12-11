@@ -680,188 +680,195 @@ if len(sys.argv) > 3: # expect spatial subset bbox coords as <ullat,ullon,lrlat,
 
 	
 
-# Load the angle observations from the metadata
-(Tile_ID, AngleObs) = get_angleobs( XML_File )
-Tile_Base = Tile_ID.split('.')
-#print 'Loaded view angles from metadata for tile: ',Tile_ID.split('_')[-2][1:] + '_T_' + (Tile_ID.split('_')[-4]).split('T')[0] 
+try:
+    # Load the angle observations from the metadata
+    (Tile_ID, AngleObs) = get_angleobs( XML_File )
+    Tile_Base = Tile_ID.split('.')
+    #print 'Loaded view angles from metadata for tile: ',Tile_ID.split('_')[-2][1:] + '_T_' + (Tile_ID.split('_')[-4]).split('T')[0] 
 
-# Reconstruct the Orbit from the Angles
-(Orbit, TimeParms) = Fit_Orbit( AngleObs )
-Omega0 = asin( sin( Orbit[0] ) / sin( Orbit[3] ) )
-Orbit.append( Omega0 )
-Lon0 = Orbit[1] - asin( tan( Orbit[0] ) / -tan( Orbit[3] ) )
-Orbit.append( Lon0 )
+    # Reconstruct the Orbit from the Angles
+    (Orbit, TimeParms) = Fit_Orbit( AngleObs )
+    Omega0 = asin( sin( Orbit[0] ) / sin( Orbit[3] ) )
+    Orbit.append( Omega0 )
+    Lon0 = Orbit[1] - asin( tan( Orbit[0] ) / -tan( Orbit[3] ) )
+    Orbit.append( Lon0 )
 
-#print 'Orbit processing complete'
+    #print 'Orbit processing complete'
 
-# Load the detector footprints
-BandFoot = get_detfootprint( XML_File )
-#print 'Loaded detector footprints from QI files'
+    # Load the detector footprints
+    BandFoot = get_detfootprint( XML_File )
+    #print 'Loaded detector footprints from QI files'
 
-# Loop through the bands using TimeParms which are in band order
-def loop(tparms, AngleObs, gsd, subsamp, BandFoot, Orbit,  XML_File, sul_lat,sul_lon,slr_lat,slr_lon):
-    band = tparms['band']
-    coeffs = tparms['tmodel']
-    # Set up the output array
-    out_rows = AngleObs['nrows'] * 60 / gsd[band] / subsamp
-    out_cols = AngleObs['ncols'] * 60 / gsd[band] / subsamp
-    if subsamp > 1:
-	    out_rows += 1
-	    out_cols += 1
-    #######################################################
-    ## Sudipta addition to support spatial subset
-    ######################################################
-    if (sul_lat is not None):
-	    # Convert the spatial subset bbox lat, lon to UTM coords.
-	    ul_sx,ul_sy,_,_ = from_latlon(sul_lat, sul_lon)
-	    lr_sx,lr_sy,_,_ = from_latlon(slr_lat, slr_lon)
-	    
-	    # now calculate the bbox row, col pairs
-	    ulx = AngleObs['ul_x']
-	    uly = AngleObs['ul_y']
-	    ul_s_c = max(0,int((ul_sx - ulx)/gsd[band]/subsamp))
-	    ul_s_r = max(0,int((uly - ul_sy)/gsd[band]/subsamp))
-	    lr_s_c = min(out_cols,int((lr_sx - ulx)/gsd[band]/subsamp))
-	    lr_s_r = min(out_rows,int((uly - lr_sy)/gsd[band]/subsamp))
-    else:
-	    ul_s_r = 0
-	    ul_s_c = 0
-	    lr_s_r = out_rows
-	    lr_s_c = out_cols
-    
-    #print "ul_s_r = {}, ul_s_c = {}, lr_s_r = {}, lr_s_c = {}".format(ul_s_r, ul_s_c, lr_s_r, lr_s_c)
-    #sys.exit(0)
-    #######################################################
-    ## Sudipta addition to support spatial subset
-    ######################################################
-    
-    #GVecs = CalcGroundVectors( AngleObs, gsd[band], subsamp, out_rows, out_cols)
-    # sudipta changed above to support spatial subset
-    GVecs = CalcGroundVectors( AngleObs, gsd[band], subsamp, ul_s_r, lr_s_r, ul_s_c, lr_s_c, out_rows, out_cols)
-    zenith = np.zeros( (out_rows, out_cols) )
-    azimuth = np.zeros( (out_rows, out_cols) )
-    detcount = np.matrix( np.zeros( (out_rows, out_cols) ) )
-    # Find the detector footprints for this band
-    for foot in BandFoot:
-	    if foot['bandId'] == band:
-		    detId = foot['detId']
-		    bandName = foot['bandName']
-		    #print 'Scanning band ', band, ' detector ', detId
-		    minloc = [ foot['coords'][0][0], foot['coords'][0][1] ]
-		    maxloc = [ foot['coords'][0][0], foot['coords'][0][1] ]
-		    for pointloc in foot['coords']:
-			    if pointloc[0] < minloc[0]:
-				    minloc[0] = pointloc[0]
-			    if pointloc[0] > maxloc[0]:
-				    maxloc[0] = pointloc[0]
-			    if pointloc[1] < minloc[1]:
-				    minloc[1] = pointloc[1]
-			    if pointloc[1] > maxloc[1]:
-				    maxloc[1] = pointloc[1]
-		    segs = []
-		    for index in range(len(foot['coords'])-1):
-			    point0 = foot['coords'][index]
-			    point1 = foot['coords'][index+1]
-			    if point1[1] == point0[1]:
-				    slope = 0.0
-				    intercept = point0[0]
-			    else:
-				    slope = (point1[0] -  point0[0]) / (point1[1] - point0[1])
-				    intercept = point0[0] - slope * point0[1]
-			    if point1[1] < point0[1]:
-				    ymin = point1[1]
-				    ymax = point0[1]
-			    else:
-				    ymin = point0[1]
-				    ymax = point1[1]
-			    segs.append( { 'y0' : point0[1], 'ymin' : ymin, 'ymax' : ymax, 'slope' : slope, 'intercept' : intercept } )
-		    # Scan the array
-		    #for row in range( out_rows ):
-		    # sudipta changed above to support spatial subset
-		    for row in range( ul_s_r, lr_s_r):
-			    dy = float(row*gsd[band]*subsamp)
-			    y = AngleObs['ul_y'] - dy - gsd[band]/2.0
-			    if y < minloc[1] or y > maxloc[1]:
-				    continue
-			    xlist = []
-			    for seg in segs:
-				    if y == seg['y0'] or (y > seg['ymin'] and y < seg['ymax']):
-					    x = seg['intercept'] + y * seg['slope']
-					    xlist.append( x )
-			    xlist.sort()
-			    if len(xlist)%2 > 0:
-				    print 'Invalid footprint intersection'
-				    break
-			    #for col in range( out_cols ):
-			    # sudipta changed above to support spatial subset
-			    for col in range( ul_s_c, lr_s_c):
-				    dx = float(col*gsd[band]*subsamp)
-				    x = AngleObs['ul_x'] + dx + gsd[band]/2.0
-				    if x < minloc[0] or x > maxloc[0]:
-					    continue
-				    # See if this point is inside the footprint
-				    index = 0
-				    while index < len(xlist):
-					    if x >= xlist[index] and x < xlist[index+1]:
-						    # It is
-						    calctime = coeffs[detId][0] + coeffs[detId][1]*dx + coeffs[detId][2]*dy + coeffs[detId][3]*dx*dy
-						    detcount[row,col] += 1
-						    Px = CalcOrbit( calctime, Orbit )
-						    Gx = [ GVecs[row,col,0], GVecs[row,col,1], GVecs[row,col,2] ]
-						    Vx = [ Px[0]-Gx[0], Px[1]-Gx[1], Px[2]-Gx[2] ]
-						    Vlen = Magnitude( Vx )
-						    Vx = [ Vx[0]/Vlen, Vx[1]/Vlen, Vx[2]/Vlen ]
-						    LSRz = [ Gx[0]/a, Gx[1]/a, Gx[2]/b ]
-						    Vlen = sqrt( LSRz[0]*LSRz[0] + LSRz[1]*LSRz[1] )
-						    LSRx = [ -LSRz[1]/Vlen, LSRz[0]/Vlen, 0.0 ]
-						    LSRy = [ LSRz[1]*LSRx[2]-LSRz[2]*LSRx[1], LSRz[2]*LSRx[0]-LSRz[0]*LSRx[2], LSRz[0]*LSRx[1]-LSRz[1]*LSRx[0] ]
-						    LSRVec = [ Dot( Vx, LSRx ), Dot( Vx, LSRy ), Dot( Vx, LSRz ) ]
-						    zenith[row,col] += round( acos( LSRVec[2] ) * todeg * 100.0 )
-						    azimuth[row,col] +=  round( atan2( LSRVec[0], LSRVec[1] ) * todeg * 100.0 )
-						    if detcount[row,col] > 1:
-							    zenith[row,col] /= detcount[row,col]
-							    azimuth[row,col] /= detcount[row,col]
-						    index = len(xlist)
-					    else:
-						    index += 2
-					    
-    #print "row = {}, col = {}, zenith = {}".format(1000,450,zenith[1000,450])
-    # Write out the angles
-    
-    Dir = os.path.dirname( XML_File )
-    directory = Dir + '/angles/'
+    # Loop through the bands using TimeParms which are in band order
+    def loop(tparms, AngleObs, gsd, subsamp, BandFoot, Orbit,  XML_File, sul_lat,sul_lon,slr_lat,slr_lon):
+	band = tparms['band']
+	coeffs = tparms['tmodel']
+	# Set up the output array
+	out_rows = AngleObs['nrows'] * 60 / gsd[band] / subsamp
+	out_cols = AngleObs['ncols'] * 60 / gsd[band] / subsamp
+	if subsamp > 1:
+		out_rows += 1
+		out_cols += 1
+	#######################################################
+	## Sudipta addition to support spatial subset
+	######################################################
+	if (sul_lat is not None):
+		# Convert the spatial subset bbox lat, lon to UTM coords.
+		ul_sx,ul_sy,_,_ = from_latlon(sul_lat, sul_lon)
+		lr_sx,lr_sy,_,_ = from_latlon(slr_lat, slr_lon)
+		
+		# now calculate the bbox row, col pairs
+		ulx = AngleObs['ul_x']
+		uly = AngleObs['ul_y']
+		ul_s_c = max(0,int((ul_sx - ulx)/gsd[band]/subsamp))
+		ul_s_r = max(0,int((uly - ul_sy)/gsd[band]/subsamp))
+		lr_s_c = min(out_cols,int((lr_sx - ulx)/gsd[band]/subsamp))
+		lr_s_r = min(out_rows,int((uly - lr_sy)/gsd[band]/subsamp))
+	else:
+		ul_s_r = 0
+		ul_s_c = 0
+		lr_s_r = out_rows
+		lr_s_c = out_cols
+	
+	#print "ul_s_r = {}, ul_s_c = {}, lr_s_r = {}, lr_s_c = {}".format(ul_s_r, ul_s_c, lr_s_r, lr_s_c)
+	#sys.exit(0)
+	#######################################################
+	## Sudipta addition to support spatial subset
+	######################################################
+	
+	#GVecs = CalcGroundVectors( AngleObs, gsd[band], subsamp, out_rows, out_cols)
+	# sudipta changed above to support spatial subset
+	GVecs = CalcGroundVectors( AngleObs, gsd[band], subsamp, ul_s_r, lr_s_r, ul_s_c, lr_s_c, out_rows, out_cols)
+	zenith = np.zeros( (out_rows, out_cols) )
+	azimuth = np.zeros( (out_rows, out_cols) )
+	detcount = np.matrix( np.zeros( (out_rows, out_cols) ) )
+	# Find the detector footprints for this band
+	for foot in BandFoot:
+		if foot['bandId'] == band:
+			detId = foot['detId']
+			bandName = foot['bandName']
+			#print 'Scanning band ', band, ' detector ', detId
+			minloc = [ foot['coords'][0][0], foot['coords'][0][1] ]
+			maxloc = [ foot['coords'][0][0], foot['coords'][0][1] ]
+			for pointloc in foot['coords']:
+				if pointloc[0] < minloc[0]:
+					minloc[0] = pointloc[0]
+				if pointloc[0] > maxloc[0]:
+					maxloc[0] = pointloc[0]
+				if pointloc[1] < minloc[1]:
+					minloc[1] = pointloc[1]
+				if pointloc[1] > maxloc[1]:
+					maxloc[1] = pointloc[1]
+			segs = []
+			for index in range(len(foot['coords'])-1):
+				point0 = foot['coords'][index]
+				point1 = foot['coords'][index+1]
+				if point1[1] == point0[1]:
+					slope = 0.0
+					intercept = point0[0]
+				else:
+					slope = (point1[0] -  point0[0]) / (point1[1] - point0[1])
+					intercept = point0[0] - slope * point0[1]
+				if point1[1] < point0[1]:
+					ymin = point1[1]
+					ymax = point0[1]
+				else:
+					ymin = point0[1]
+					ymax = point1[1]
+				segs.append( { 'y0' : point0[1], 'ymin' : ymin, 'ymax' : ymax, 'slope' : slope, 'intercept' : intercept } )
+			# Scan the array
+			#for row in range( out_rows ):
+			# sudipta changed above to support spatial subset
+			for row in range( ul_s_r, lr_s_r):
+				dy = float(row*gsd[band]*subsamp)
+				y = AngleObs['ul_y'] - dy - gsd[band]/2.0
+				if y < minloc[1] or y > maxloc[1]:
+					continue
+				xlist = []
+				for seg in segs:
+					if y == seg['y0'] or (y > seg['ymin'] and y < seg['ymax']):
+						x = seg['intercept'] + y * seg['slope']
+					        xlist.append( x )
+				xlist.sort()
+				if len(xlist)%2 > 0:
+					print 'Invalid footprint intersection'
+					break
+				#for col in range( out_cols ):
+				# sudipta changed above to support spatial subset
+				for col in range( ul_s_c, lr_s_c):
+					dx = float(col*gsd[band]*subsamp)
+					x = AngleObs['ul_x'] + dx + gsd[band]/2.0
+					if x < minloc[0] or x > maxloc[0]:
+						continue
+					# See if this point is inside the footprint
+					index = 0
+					while index < len(xlist):
+						if x >= xlist[index] and x < xlist[index+1]:
+							# It is
+							calctime = coeffs[detId][0] + coeffs[detId][1]*dx + coeffs[detId][2]*dy + coeffs[detId][3]*dx*dy
+							detcount[row,col] += 1
+							Px = CalcOrbit( calctime, Orbit )
+							Gx = [ GVecs[row,col,0], GVecs[row,col,1], GVecs[row,col,2] ]
+							Vx = [ Px[0]-Gx[0], Px[1]-Gx[1], Px[2]-Gx[2] ]
+							Vlen = Magnitude( Vx )
+							Vx = [ Vx[0]/Vlen, Vx[1]/Vlen, Vx[2]/Vlen ]
+							LSRz = [ Gx[0]/a, Gx[1]/a, Gx[2]/b ]
+							Vlen = sqrt( LSRz[0]*LSRz[0] + LSRz[1]*LSRz[1] )
+							LSRx = [ -LSRz[1]/Vlen, LSRz[0]/Vlen, 0.0 ]
+							LSRy = [ LSRz[1]*LSRx[2]-LSRz[2]*LSRx[1], LSRz[2]*LSRx[0]-LSRz[0]*LSRx[2], LSRz[0]*LSRx[1]-LSRz[1]*LSRx[0] ]
+							LSRVec = [ Dot( Vx, LSRx ), Dot( Vx, LSRy ), Dot( Vx, LSRz ) ]
+							zenith[row,col] += round( acos( LSRVec[2] ) * todeg * 100.0 )
+							azimuth[row,col] +=  round( atan2( LSRVec[0], LSRVec[1] ) * todeg * 100.0 )
+							if detcount[row,col] > 1:
+								zenith[row,col] /= detcount[row,col]
+								azimuth[row,col] /= detcount[row,col]
+							index = len(xlist)
+						else:
+							index += 2
+						
+	#print "row = {}, col = {}, zenith = {}".format(1000,450,zenith[1000,450])
+	# Write out the angles
+	
+	Dir = os.path.dirname( XML_File )
+	directory = Dir + '/angles/'
+	try:
+	    os.makedirs(directory)
+	except OSError as e:
+	    if e.errno != errno.EEXIST:
+		raise
+	Out_File = directory + 'VAA_VZA_'+ bandName + '.img'
+	#Out_File = Tile_Base[0][:-4] + '_Sat_' + bandName + '.img'
+	#hfile = open( Out_File, 'wb' )
+	#for ang in np.nditer( azimuth, order='C'):
+	#	hfile.write( struct.pack('h',ang) )
+	#for ang in np.nditer( zenith, order='C'):
+	#	hfile.write( struct.pack('h',ang) )
+	#hfile.close()
+	# Sudiptas addition
+	driver = gdal.GetDriverByName("ENVI")
+	hfile = driver.Create(Out_File, out_rows, out_cols, 2, gdal.GDT_Int16)
+	hfile.GetRasterBand(1).WriteArray(azimuth, 0, 0)
+	hfile.GetRasterBand(2).WriteArray(zenith, 0, 0)
+	hfile = None
+	# remove the default envi header file that gdal creates to replace
+	tmphdr = Dir + '/angles/VAA_VZA_'+ bandName + '.hdr' 
+	#tmphdr = Tile_Base[0][:-4] + '_Sat_' + bandName + '.hdr'
+	os.remove(tmphdr)
+	Hdr_File = WriteHeader( Out_File, out_rows, out_cols, AngleObs['ul_x'], AngleObs['ul_y'], gsd[band]*subsamp, AngleObs['zone'], AngleObs['hemis'] )
+	#print 'Created image file %s and header file %s.' % (Out_File, Hdr_File)
+        #sys.exit(0)
+    from functools import partial 
+    par = partial(loop, AngleObs=AngleObs, gsd=gsd, subsamp = subsamp, BandFoot=BandFoot, Orbit = Orbit,\
+		  XML_File = XML_File, sul_lat=sul_lat, sul_lon = sul_lon, slr_lat = slr_lat,slr_lon = slr_lon)
+
+    from multiprocessing import Pool
+    p = Pool(len(TimeParms))
     try:
-	os.makedirs(directory)
-    except OSError as e:
-	if e.errno != errno.EEXIST:
-	    raise
-    Out_File = directory + 'VAA_VZA_'+ bandName + '.img'
-    #Out_File = Tile_Base[0][:-4] + '_Sat_' + bandName + '.img'
-    #hfile = open( Out_File, 'wb' )
-    #for ang in np.nditer( azimuth, order='C'):
-    #	hfile.write( struct.pack('h',ang) )
-    #for ang in np.nditer( zenith, order='C'):
-    #	hfile.write( struct.pack('h',ang) )
-    #hfile.close()
-    # Sudiptas addition
-    driver = gdal.GetDriverByName("ENVI")
-    hfile = driver.Create(Out_File, out_rows, out_cols, 2, gdal.GDT_Int16)
-    hfile.GetRasterBand(1).WriteArray(azimuth, 0, 0)
-    hfile.GetRasterBand(2).WriteArray(zenith, 0, 0)
-    hfile = None
-    # remove the default envi header file that gdal creates to replace
-    tmphdr = Dir + '/angles/VAA_VZA_'+ bandName + '.hdr' 
-    #tmphdr = Tile_Base[0][:-4] + '_Sat_' + bandName + '.hdr'
-    os.remove(tmphdr)
-    Hdr_File = WriteHeader( Out_File, out_rows, out_cols, AngleObs['ul_x'], AngleObs['ul_y'], gsd[band]*subsamp, AngleObs['zone'], AngleObs['hemis'] )
-    #print 'Created image file %s and header file %s.' % (Out_File, Hdr_File)
-    #sys.exit(0)
-from functools import partial 
-par = partial(loop, AngleObs=AngleObs, gsd=gsd, subsamp = subsamp, BandFoot=BandFoot, Orbit = Orbit,\
-              XML_File = XML_File, sul_lat=sul_lat, sul_lon = sul_lon, slr_lat = slr_lat,slr_lon = slr_lon)
-
-from multiprocessing import Pool
-p = Pool(len(TimeParms))
-p.map(par, TimeParms)
-#par(TimeParms[0])
-#loop(TimeParms, AngleObs, gsd, subsamp, BandFoot, Orbit,  XML_File, sul_lat,sul_lon,slr_lat,slr_lon)
+	p.map(par, TimeParms)
+    except:
+	pass
+    #par(TimeParms[0])
+    #loop(TimeParms, AngleObs, gsd, subsamp, BandFoot, Orbit,  XML_File, sul_lat,sul_lon,slr_lat,slr_lon)
+except:
+    #print 'reconstruction of s2 angles failed.'
+    pass 

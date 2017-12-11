@@ -298,23 +298,25 @@ class read_s2(object):
 
 		self.vaa = {}; self.vza = {}
 		fname = [self.s2_file_dir+'/angles/VAA_VZA_%s.img'%band for band in bands]
-		f = lambda fn: reproject_data(fn, self.s2_file_dir+'/B04.jp2', outputType= gdal.GDT_Float32).data
-		ret = parmap(f, fname)
-		for i,angs in enumerate(ret):
-		    #angs[0][angs[0]<0] = (36000 + angs[0][angs[0]<0])
-		    angs = angs.astype(float)/100.
-		    if slic is None:
-			self.vaa[bands[i]] = angs[0]
-			self.vza[bands[i]] = angs[1]
-		    else:
-			x_ind, y_ind = np.array(slic)
-			self.vaa[bands[i]] = angs[0][x_ind, y_ind]
-			self.vza[bands[i]] = angs[1][x_ind, y_ind]
-		self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
-      			       'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
+                if len(glob(self.s2_file_dir + '/angles/VAA_VZA_*.img')) == 13:
+		    f = lambda fn: reproject_data(fn, self.s2_file_dir+'/B04.jp2', outputType= gdal.GDT_Float32).data
+		    ret = parmap(f, fname)
+		    for i,angs in enumerate(ret):
+		        #angs[0][angs[0]<0] = (36000 + angs[0][angs[0]<0])
+		        angs = angs.astype(float)/100.
+		        if slic is None:
+			    self.vaa[bands[i]] = angs[0]
+			    self.vza[bands[i]] = angs[1]
+		        else:
+			    x_ind, y_ind = np.array(slic)
+			    self.vaa[bands[i]] = angs[0][x_ind, y_ind]
+			    self.vza[bands[i]] = angs[1][x_ind, y_ind]
+		    self.angles = {'sza':self.sza, 'saa':self.saa, 'msz':self.msz, 'msa':self.msa,\
+      		    	           'vza':self.vza, 'vaa': self.vaa, 'mvz':self.mvz, 'mva':self.mva}
+                else:
+                    print 'Reconstruct failed and original angles are used.'
             except:
                 print 'Reconstruct failed and original angles are used.'
-
 if __name__ == '__main__':
     
     s2 = read_s2('/home/ucfafyi/DATA/S2_MODIS/s_data/', '29SQB', \

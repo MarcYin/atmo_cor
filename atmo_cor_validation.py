@@ -10,7 +10,7 @@ year       = int(file_path.split('/')[-5])
 s2_tile = ''.join(file_path.split('/')[-8:-5])
 aero = solve_aerosol(year, month, day, \
                      s2_toa_dir = s2_toa_dir,
-                     mcd43_dir  = '/data/selene/ucfajlg/Hebei/MCD43/', \
+                     mcd43_dir  = '/data/nemesis/MCD43/', \
                      emus_dir   = '/home/ucfafyi/DATA/Multiply/emus/', s2_tile=s2_tile, s2_psf=None)
 aero.solving_s2_aerosol()
 atm = atmospheric_correction(year, month, day, s2_tile, s2_toa_dir  = s2_toa_dir)

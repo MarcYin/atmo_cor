@@ -71,8 +71,9 @@ class solving_atmo_paras(object):
         self.block_size   = int(np.ceil(1. * self.aero_res / self.pix_res))
         self.num_blocks_x = int(np.ceil(self.full_res[0]/(self.block_size)))
         self.num_blocks_y = int(np.ceil(self.full_res[1]/(self.block_size)))
-        self.mask         = self.mask.reshape(self.num_blocks_x, self.block_size, \
-                                              self.num_blocks_y, self.block_size).astype(int).sum(axis=(3,1)) > 0
+        #self.mask = self.mask.reshape(self.num_blocks, self.block_size, \
+        #                              self.num_blocks, self.block_size).astype(int).sum(axis=(3,1))
+        #self.mask = (self.mask/((1.*self.block_size)**2)) >= 0.5 
         try: 
             #import pdb; pdb.set_trace()
             zero_aod  = np.zeros((self.num_blocks_x, self.num_blocks_y))
@@ -122,6 +123,7 @@ class solving_atmo_paras(object):
         self.xcp_emus    = self.emus[2][self.band_indexs]
         self.up_bounds   = self.xap_emus[0].inputs[:,3:6].max(axis=0)
         self.bot_bounds  = self.xap_emus[0].inputs[:,3:6].min(axis=0)
+        self.bot_bounds[0] = 0.001
         #self.uncs        = self.uncs  [:, self.resample_hx, self.resample_hx]
         #self.priors      = self.priors[:, self.resample_hx, self.resample_hx]
         y                = np.zeros((self.num_blocks_x, self.num_blocks_y))
@@ -155,7 +157,11 @@ class solving_atmo_paras(object):
         y        = xap_H * self.toa - xbp_H
         sur_ref  = y / (1 + xcp_H * y) 
         diff     = sur_ref - self.boa
-        J        = np.nansum(0.5 * self.band_weights[...,None] * (diff)**2 / self.boa_unc**2)
+        full_J   = np.nansum(0.5 * self.band_weights[...,None] * (diff)**2 / self.boa_unc**2, axis=0)
+        J        = np.zeros(self.full_res)
+        J[self.Hx, self.Hy] = full_J
+        J = np.nansum(J.reshape(self.num_blocks_x, self.block_size, \
+                                self.num_blocks_y, self.block_size).sum(axis=(3,1))*self.mask)
         dH       = -1 * (-self.toa[...,None] * xap_dH + xcp_dH * (xbp_H[...,None] - xap_H[...,None] * self.toa[...,None])**2 + \
                          xbp_dH) /(self.toa[...,None] * xap_H[...,None] * xcp_H[...,None] - xbp_H[...,None] * xcp_H[...,None] + 1)**2
         full_dJ  = [ self.band_weights[...,None] * dH[:,:,i] * diff / (self.boa_unc**2) for i in range(3)]
@@ -166,7 +172,7 @@ class solving_atmo_paras(object):
             J_[:, self.Hx, self.Hy] = dJ
             J_ = J_.reshape(3, self.num_blocks_x, self.block_size, \
                                self.num_blocks_y, self.block_size).sum(axis=(4,2))
-            J_ = J_.reshape(3, -1)
+            J_ = J_.reshape(3, -1) * np.repeat(self.mask.ravel()[None, ...], 3, axis=0)
         else:
             J_ = np.array(full_dJ).sum(axis=(1, 2))
         return J, J_
@@ -246,7 +252,7 @@ class solving_atmo_paras(object):
         up  = up.ravel()
         bounds  = np.array([bot, up]).T 
         psolve = optimize.fmin_l_bfgs_b(self._cost, p0, approx_grad = 0, iprint = 1, \
-                                        maxiter=500, pgtol = 1e-4,factr=1e5, bounds = bounds,fprime=None)
+                                        maxiter=500, pgtol = 1e-4,factr=1e4, bounds = bounds,fprime=None)
         return psolve
 
 if __name__ == '__main__':

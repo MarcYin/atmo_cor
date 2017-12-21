@@ -49,17 +49,20 @@ class read_l8(object):
             self.saa_sza = [self.toa_dir + '/%s_solar_B%02d.img' %(self.header, i) for i in self.bands]
             self.vaa_vza = [self.toa_dir + '/%s_sensor_B%02d.img'%(self.header, i) for i in self.bands]
         except:
-           ang_file     = self.toa_dir + '/%s_ANG.txt'%self.header
-           cwd = os.getcwd()
-           os.chdir(self.toa_dir)
-           f            =  lambda band: subprocess.call([self.angle_exe, ang_file, \
-                                                         'BOTH', '1', '-f', '-32768', '-b', str(band)])
-           parmap(f, self.bands)
-           os.chdir(cwd)
-           self.saa_sza = [self.toa_dir + '/%s_solar_B%02d.img' %(self.header, i) for i in self.bands]
-           self.vaa_vza = [self.toa_dir + '/%s_sensor_B%02d.img'%(self.header, i) for i in self.bands]
+            ang_file     = self.toa_dir + '/%s_ANG.txt'%self.header
+            cwd = os.getcwd()
+            os.chdir(self.toa_dir)
+            f            =  lambda band: subprocess.call([self.angle_exe, ang_file, \
+                                                          'BOTH', '1', '-f', '-32768', '-b', str(band)])
+            parmap(f, self.bands)
+            os.chdir(cwd)
+            self.saa_sza = [self.toa_dir + '/%s_solar_B%02d.img' %(self.header, i) for i in self.bands]
+            self.vaa_vza = [self.toa_dir + '/%s_sensor_B%02d.img'%(self.header, i) for i in self.bands]
+        try:
+            scale, offset = self._get_scale()
+        except:
+            raise IOError, 'Failed read in scalling factors.'
 
-   
     def _get_toa(self,):
         try:
             scale, offset = self._get_scale()
@@ -69,21 +72,24 @@ class read_l8(object):
         bands_offset = offset[self.bands-1] 
         toa          = np.array(parmap(gdal_reader, self.toa_file)).astype(float) * \
                                 bands_scale[...,None, None] + bands_offset[...,None, None]
-        self._get_qa()
-        self._get_angles()
-        toa      = toa / np.cos(np.deg2rad(self.sza))
+        qa_mask  = self._get_qa()
+        sza      = self._get_angles()[1]
+        toa      = toa / np.cos(np.deg2rad(sza))
         toa_mask = toa < 0
-        mask     = self.qa_mask | toa_mask | self.ang_mask
+        mask     = qa_mask | toa_mask | sza.mask
         toa      = np.ma.array(toa, mask=mask)
         return toa
+
     def _get_angles(self,):
-        self.saa, self.sza = np.array(parmap(gdal_reader, self.saa_sza)).astype(float).transpose(1,0,2,3)/100.
-        self.vaa, self.vza = np.array(parmap(gdal_reader, self.vaa_vza)).astype(float).transpose(1,0,2,3)/100.
-        self.saa = np.ma.array(self.saa, mask = ((self.saa > 180) | (self.saa < -180)))
-        self.sza = np.ma.array(self.sza, mask = ((self.sza > 90 ) | (self.sza < 0   )))
-        self.vaa = np.ma.array(self.vaa, mask = ((self.vaa > 180) | (self.vaa < -180)))
-        self.vza = np.ma.array(self.vza, mask = ((self.vza > 90 ) | (self.vza < 0   )))
-        self.ang_mask = self.saa.mask | self.sza.mask | self.vaa.mask | self.vza.mask
+        saa, sza = np.array(parmap(gdal_reader, self.saa_sza)).astype(float).transpose(1,0,2,3)/100.
+        vaa, vza = np.array(parmap(gdal_reader, self.vaa_vza)).astype(float).transpose(1,0,2,3)/100.
+        saa = np.ma.array(saa, mask = ((saa > 180) | (saa < -180)))
+        sza = np.ma.array(sza, mask = ((sza > 90 ) | (sza < 0   )))
+        vaa = np.ma.array(vaa, mask = ((vaa > 180) | (vaa < -180)))
+        vza = np.ma.array(vza, mask = ((vza > 90 ) | (vza < 0   )))
+        saa.mask = sza.mask = vaa.mask = vza.mask = (saa.mask | sza.mask | vaa.mask | vza.mask)
+        return saa, sza, vaa, vza
+
     def _get_scale(self,):
         scale, offset = [], []
         with open( self.mete_file, 'rb') as f:
@@ -102,7 +108,8 @@ class read_l8(object):
 
     def _get_qa(self,):
         bqa = gdal_reader(self.qa_file)
-        self.qa_mask = ~((bqa >= 2720) & (bqa <= 2732))
+        qa_mask = ~((bqa >= 2720) & (bqa <= 2732))
+        return qa_mask
 if __name__ == '__main__':
     l8 = read_l8('/home/ucfafyi/DATA/S2_MODIS/l_data/', (123, 34), 2017, 4, 21, bands=[2,3,4,5,6,7])
     #toa = l8._get_toa()

@@ -1,4 +1,5 @@
 #/usr/bin/env python
+import os
 import sys
 sys.path.insert(0,'python')
 import gdal
@@ -13,6 +14,8 @@ from grab_s2_toa import read_s2
 #from aerosol_solver import solve_aerosol
 from reproject import reproject_data
 from emulation_engine import AtmosphericEmulationEngine
+import warnings
+warnings.filterwarnings("ignore")
 
 class atmospheric_correction(object):
     '''
@@ -182,8 +185,10 @@ class atmospheric_correction(object):
         projection   = g.GetProjection()
         geotransform = g.GetGeoTransform()
         nx, ny = rgb_array.shape[:2]
-        dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
-                                '/%s'%name, ny, nx, 3, gdal.GDT_Byte)
+        outputFileName = self.s2.s2_file_dir+'/%s'%name
+        if os.path.exists(outputFileName):
+            os.remove(outputFileName)
+        dst_ds = gdal.GetDriverByName('GTiff').Create(outputFileName, ny, nx, 3, gdal.GDT_Byte)
         dst_ds.SetGeoTransform(geotransform)
         dst_ds.SetProjection(projection)
         dst_ds.GetRasterBand(1).WriteArray(rgb_array[:,:,0])
@@ -203,8 +208,10 @@ class atmospheric_correction(object):
     def _save_band(self, band_ref, projection, geotransform):
         band, ref = band_ref
         nx, ny = ref.shape
-        dst_ds = gdal.GetDriverByName('GTiff').Create(self.s2.s2_file_dir+\
-                                '/%s_sur.tif'%band, ny, nx, 1, gdal.GDT_Float32)
+        outputFileName = self.s2.s2_file_dir+'/%s_sur.tif'%band
+        if os.path.exists(outputFileName):
+            os.remove(outputFileName)
+        dst_ds = gdal.GetDriverByName('GTiff').Create(outputFileName, ny, nx, 1, gdal.GDT_Float32)
         dst_ds.SetGeoTransform(geotransform)    
         dst_ds.SetProjection(projection) 
         dst_ds.GetRasterBand(1).WriteArray(ref)

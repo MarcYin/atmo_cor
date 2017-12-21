@@ -256,8 +256,12 @@ class read_s2(object):
 	for i, band in enumerate(self.s2_bands):
 	    vaa[band]  = bands_vaa[i]
 	    vza[band]  = bands_vza[i]
-	    mva_[band] = mva[i]
-	    mvz_[band] = mvz[i]               
+            try:
+	        mva_[band] = mva[i]
+	        mvz_[band] = mvz[i]
+            except:
+                mva_[band] = np.nan
+                mvz_[band] = np.nan        
 
 	if self.bands is None:
             bands = self.s2_bands

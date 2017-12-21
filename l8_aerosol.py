@@ -84,6 +84,15 @@ class solve_aerosol(object):
         else:
             return cgaus
 
+    def _extend_vals(self, val):
+        self.block_size = int(self.aero_res / 30.)
+        self.num_blocks = int(np.ceil(max(self.full_res) / self.block_size))
+        self.efull_res  = self.block_size * self.num_blocks 
+        temp            = np.zeros((self.efull_res, self.efull_res))
+        temp[:]         = np.nan
+        temp[:self.full_res[0], :self.full_res[1]] = val
+        return temp
+
     def _l8_aerosol(self,):
         self.logger.propagate = False
         self.logger.info('Start to retrieve atmospheric parameters.')
@@ -135,9 +144,12 @@ class solve_aerosol(object):
         ele_data = reproject_data(self.global_dem, self.example_file).data
         mask = ~np.isfinite(ele_data)
         ele_data = np.ma.array(ele_data, mask = mask)/1000.
-        self.elevation = ele_data[self.Hx, self.Hy]
         
         self.logger.info('Getting pripors from ECMWF forcasts.')
+        aot, tcwv, tco3 = np.array(self._read_cams(self.example_file))
+        
+   
+
         aot, tcwv, tco3 = np.array(self._read_cams(self.example_file))
         self.aot        = aot [self.Hx, self.Hy] #* (1-0.14) # validation of +14% biase
         self.tco3       = tco3[self.Hx, self.Hy] #* (1 - 0.05)
@@ -145,11 +157,6 @@ class solve_aerosol(object):
         self.aot_unc    = np.ones(self.aot.shape)  * 0.5
         self.tcwv_unc   = np.ones(self.tcwv.shape) * 0.2
         self.tco3_unc   = np.ones(self.tco3.shape) * 0.2
-
-        self.logger.info('Trying to get the aod from ddv method.')
-        #try:
-        self._get_ddv_aot(toa, l8, tcwv, tco3, ele_data)
-
 
 
 

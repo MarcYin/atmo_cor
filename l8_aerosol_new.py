@@ -16,9 +16,10 @@ from osgeo import osr
 from multi_process import parmap
 from scipy.ndimage import binary_dilation, binary_erosion
 from reproject import reproject_data
+from scipy.interpolate import griddata
 from grab_brdf import MCD43_SurRef
+from atmo_solver import solving_atmo_paras
 from grab_uncertainty import grab_uncertainty
-from atmo_paras_optimization_new import solving_atmo_paras
 from psf_optimize import psf_optimize
 from spatial_mapping import Find_corresponding_pixels
 import warnings
@@ -43,7 +44,7 @@ class solve_aerosol(object):
                  l8_tile     = (123, 34),
                  l8_psf      = None,
                  qa_thresh   = 255,
-                 aero_res    = 3000, # resolution for aerosol retrival in meters should be larger than 500
+                 aero_res    = 6000, # resolution for aerosol retrival in meters should be larger than 500
                  ):
 
         self.year        = year
@@ -112,7 +113,8 @@ class solve_aerosol(object):
             temp = 'HDF4_EOS:EOS_GRID:"%s":mod08:Aerosol_Optical_Depth_Land_Ocean_Mean'
             g = gdal.Open(temp%glob('%s/MOD08_D3.A2016%03d.006.*.hdf'%(self.mod08_dir, self.doy))[0])
             dat = reproject_data(g, self.example_file, outputType= gdal.GDT_Float32).data * g.GetRasterBand(1).GetScale() + g.GetRasterBand(1).GetOffset()
-            dat[dat<=0] = np.nan
+            dat[dat<=0]  = np.nan
+            dat[dat>1.5] = np.nan 
             mod08_aot = np.nanmean(dat)
         except:
             mod08_aot = np.nan
@@ -121,7 +123,7 @@ class solve_aerosol(object):
     def _get_psf(self,):
         self.logger.info('No PSF parameters specified, start solving.')
         xstd, ystd  = 12., 20.
-        psf         = psf_optimize(self.toa[-2].data, [self.Hx, self.Hy], np.ma.array(self.boa[4]), self.boa_qa[4], self.cloud, 0.1, xstd=xstd, ystd= ystd)
+        psf         = psf_optimize(self.toa[-1].data, [self.Hx, self.Hy], np.ma.array(self.boa[-1]), self.boa_qa[-1], self.cloud, 0.1, xstd=xstd, ystd= ystd)
         xs, ys      = psf.fire_shift_optimize()
         ang         = 0
         self.logger.info('Solved PSF parameters are: %.02f, %.02f, %d, %d, %d, and the correlation is: %f.' \
@@ -193,10 +195,12 @@ class solve_aerosol(object):
         self.sza  = np.nanmean(self._extend_vals(self.sza ).reshape(shape2), axis=(4,2))
         self.vaa  = np.nanmean(self._extend_vals(self.vaa ).reshape(shape2), axis=(4,2))
         self.vza  = np.nanmean(self._extend_vals(self.vza ).reshape(shape2), axis=(4,2))
-        self.aot_unc    = np.ones(self.aot.shape)  * 0.5
-        self.tcwv_unc   = np.ones(self.tcwv.shape) * 0.2
+        self.aot_unc    = np.ones(self.aot.shape)  * 1.
+        self.tcwv_unc   = np.ones(self.tcwv.shape) * 0.8
         self.tco3_unc   = np.ones(self.tco3.shape) * 0.2
         mod08_aot       = self._mod08_aot()
+        self.logger.info('Mean values for priors are: %.02f, %.02f, %.02f and mod08 is %.02f'%\
+                         (np.nanmean(self.aot), np.nanmean(self.tcwv), np.nanmean(self.tco3), mod08_aot))
         if np.isnan(mod08_aot):
             self.aot    = self.aot  * (1-0.14) # validation of +14% biase
         else:
@@ -249,7 +253,8 @@ class solve_aerosol(object):
         tempm = tempm.reshape(self.num_blocks, self.block_size, \
                               self.num_blocks, self.block_size).astype(int).sum(axis=(3,1))
         self.mask = np.nansum(self._extend_vals((~self.dcloud).astype(int)).reshape(shape1), axis=(3,1))
-        self.mask = ((self.mask/((1.*self.block_size)**2)) >= 0.5) & ((tempm/((self.aero_res/500.)**2)) >= 0.5)
+        self.mask = ((self.mask/((1.*self.block_size)**2)) >= 0.5) & ((tempm/((self.aero_res/500.)**2)) >= 0.5) & \
+                     (np.any(~np.isnan([self.aot, self.tcwv, self.tco3, self.sza[0]]), axis = 0))
         self.mask = binary_erosion(self.mask, structure=np.ones((3,3)).astype(bool))
         self.aero = solving_atmo_paras(self.boa,
                                   self.toa,
@@ -271,7 +276,8 @@ class solve_aerosol(object):
                                   self.aero_res,
                                   self.emus,
                                   self.band_indexs,
-                                  self.boa_bands)
+                                  self.boa_bands,
+                                  pix_res = 30)
         solved    = self.aero._optimization()
         return solved
  
@@ -372,7 +378,12 @@ class solve_aerosol(object):
         self.sensor  = 'OLI'
         self.logger.info('Doing Landsat 8 tile: (%s, %s) on %d-%02d-%02d.' \
                           % (self.l8_tile[0], self.l8_tile[1], self.year, self.month, self.day))
-        self.solved = self._l8_aerosol().reshape(3, self.num_blocks, self.num_blocks)
+        #try:
+        solved      = np.array(self._l8_aerosol()[0])
+        self.solved = solved.reshape(3, self.num_blocks, self.num_blocks)
+        #except:
+         #   pass 
+            #self.solved = np.array([self.aot, self.tcwv, self.tco3])
         self.logger.info('Finished retrieval and saving them into local files.')
         g = gdal.Open(self.example_file)
         xmin, ymax = g.GetGeoTransform()[0], g.GetGeoTransform()[3]

@@ -175,7 +175,8 @@ class solve_aerosol(object):
             temp = 'HDF4_EOS:EOS_GRID:"%s":mod08:Aerosol_Optical_Depth_Land_Ocean_Mean'
             g = gdal.Open(temp%glob('%s/MOD08_D3.A2016%03d.006.*.hdf'%(self.mod08_dir, self.doy))[0])
             dat = reproject_data(g, self.s2_file_dir+'/B01.jp2', outputType= gdal.GDT_Float32).data * g.GetRasterBand(1).GetScale() + g.GetRasterBand(1).GetOffset()
-            dat[dat<=0] = np.nan
+            dat[dat<=0]  = np.nan
+            dat[dat>1.5] = np.nan
             mod08_aot = np.nanmean(dat)
         except:
             mod08_aot = np.nan

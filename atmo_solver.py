@@ -44,6 +44,8 @@ class solving_atmo_paras(object):
         self.vza             = np.cos(vza*np.pi/180.)
         self.saa             = np.cos(saa*np.pi/180.)
         self.vaa             = np.cos(vaa*np.pi/180.)
+        if self.sza.ndim == 3:
+            self.sza, self.saa = self.sza[0], self.saa[0]
         self.raa             = np.cos((self.saa - self.vaa)*np.pi/180.)
         self.aod_prior       = aod_prior
         self.tcwv_prior      = tcwv_prior
@@ -66,6 +68,7 @@ class solving_atmo_paras(object):
         self.pix_res         = pix_res
         self.subsample       = subsample
         self.subsample_start = subsample_start
+        self.b_m_pixs        = (self.aero_res/500.)**2
  
     def _pre_process(self,):
         self.block_size   = int(np.ceil(1. * self.aero_res / self.pix_res))
@@ -137,11 +140,13 @@ class solving_atmo_paras(object):
         resample_y = (1.* hy / self.num_blocks_y*y_size).astype(int)
         resampled_parameter = parameter[resample_x, resample_y].reshape(self.num_blocks_x, self.num_blocks_y)
         return resampled_parameter
+
     def _helper(self, inp):
         H, dH = inp[0].predict(inp[1].T, do_unc=False)
         H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
                       np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
         return np.hstack([H[self.resample_hx, self.resample_hy][..., None], dH[self.resample_hx, self.resample_hy, :]])
+
     def _obs_cost(self, p, is_full = True):
         p = np.array(p).reshape(3, -1)
         X = self.control_variables.reshape(self.boa.shape[0], 7, -1)
@@ -167,14 +172,15 @@ class solving_atmo_paras(object):
         full_dJ  = [ self.band_weights[...,None] * dH[:,:,i] * diff / (self.boa_unc**2) for i in range(3)]
         
         if is_full:
-            dJ = np.array(full_dJ).sum(axis=(1,))
+            dJ = np.nansum(np.array(full_dJ), axis=(1,))
             J_ = np.zeros((3,) + self.full_res)
             J_[:, self.Hx, self.Hy] = dJ
-            J_ = J_.reshape(3, self.num_blocks_x, self.block_size, \
-                               self.num_blocks_y, self.block_size).sum(axis=(4,2))
-            J_ = J_.reshape(3, -1) * np.repeat(self.mask.ravel()[None, ...], 3, axis=0)
+            J_ = np.nansum(J_.reshape(3, self.num_blocks_x, self.block_size, \
+                                         self.num_blocks_y, self.block_size), axis=(4,2))
+            J_[:, ~self.mask] = 0
+            J_ = J_.reshape(3, -1)
         else:
-            J_ = np.array(full_dJ).sum(axis=(1, 2))
+            J_ = np.nansum(np.array(full_dJ), axis=(1, 2))
         return J, J_
          
     def _smooth_cost(self, p, is_full=True):
@@ -200,7 +206,7 @@ class solving_atmo_paras(object):
         if is_full:
             J_ = np.array(full_dJ).reshape(3, -1)
         else:
-            J_ = np.array(full_dJ).reshape(3, -1).sum(axis=(1,))
+            J_ = np.nansum(np.array(full_dJ).reshape(3, -1), axis=(1,))
         return J, J_
 
     def _fit_smoothness (self,  x, mask, sigma_model):
@@ -209,34 +215,40 @@ class solving_atmo_paras(object):
                          x[ 1:-1,:-2], x[1:-1, 2:], \
                          x[ 2:,:-2], x[ 2:, 1:-1], x[ 2:, 2:] ] )
         j_model = 0
-        der_j_model = x*0
-        for i in range(8):
-            j_model = j_model + 0.5*np.sum ( (( hood[i,:,:] - x[1:-1,1:-1] )**2) * mask[1:-1,1:-1])/sigma_model
-            der_j_model[1:-1,1:-1] = der_j_model[1:-1,1:-1] - ( hood[i,:,:] - x[1:-1,1:-1]  )/sigma_model
-        return j_model, 2*der_j_model * mask
+        der_j_model = np.zeros_like(x)
+        for i in [1,3,4,6]:
+            dif        = hood[i,:,:] - x[1:-1,1:-1] 
+            dif[~mask[1:-1,1:-1]] = 0
+            j_model = j_model + 0.5 * np.sum(dif **2)/sigma_model
+            der_j_model[1:-1,1:-1] = der_j_model[1:-1,1:-1] - dif/sigma_model
+        
+        return j_model, 2 * der_j_model
     
 
     def _prior_cost(self, p, is_full=True):
-        p       = np.array(p).reshape(3, -1)
-        J       = (0.5 * (p - self.priors)**2/self.prior_uncs**2) * np.repeat(self.mask.ravel()[None, ...], 3, axis=0)
-        full_dJ = ((p - self.priors)/self.prior_uncs**2)*np.repeat(self.mask.ravel()[None, ...], 3, axis=0)
+        p                 = np.array(p).reshape(3, -1)
+        J                 = 0.5 * (p - self.priors)**2/self.prior_uncs**2
+        full_dJ           = (p - self.priors)/self.prior_uncs**2
+        J      [:, ~self.mask.ravel()] = 0
+        full_dJ[:, ~self.mask.ravel()] = 0
         if is_full:
             J_ = np.array(full_dJ)
         else:
-            J_ = np.array(full_dJ).sum(axis=(1,))
+            J_ = np.nansum(np.array(full_dJ), axis=(1,))
         J = np.array(J).sum()
         return J, J_
 
     def _cost(self, p):
         print '-------------------------------------------------------------------------------'
-        print np.array(p).reshape(3, -1)
+        print np.array(p).reshape(3, -1)[:, self.mask.ravel()]
         obs_J, obs_J_       = self._obs_cost(p)
         prior_J, prior_J_   = self._prior_cost(p)
         #smooth_J, smooth_J_ = self._smooth_cost(p)
         smooth_J, smooth_J_ = self._new_smooth_cost(p)
-        J = obs_J/36. + prior_J + smooth_J
-        J_ = (obs_J_/36. +  prior_J_ + smooth_J_).ravel()
-        print 'costs: ', obs_J/36., prior_J, smooth_J 
+        J = obs_J/self.b_m_pixs + prior_J + smooth_J
+        J_ = (obs_J_/self.b_m_pixs +  prior_J_ + smooth_J_).ravel()
+        print 'costs:   ', [obs_J/self.b_m_pixs, prior_J, smooth_J]
+        print 'J_prime: ', ((obs_J_/self.b_m_pixs)[:,self.mask.ravel()] +  prior_J_[:, self.mask.ravel()] + smooth_J_[:, self.mask.ravel()]).sum(axis=1)
         print '-------------------------------------------------------------------------------'
         return J, J_
         
@@ -252,7 +264,7 @@ class solving_atmo_paras(object):
         up  = up.ravel()
         bounds  = np.array([bot, up]).T 
         psolve = optimize.fmin_l_bfgs_b(self._cost, p0, approx_grad = 0, iprint = 1, \
-                                        maxiter=500, pgtol = 1e-4,factr=1e4, bounds = bounds,fprime=None)
+                                        maxiter=500, pgtol = 1e-4,factr=1e3, bounds = bounds,fprime=None)
         return psolve
 
 if __name__ == '__main__':

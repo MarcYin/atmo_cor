@@ -188,25 +188,26 @@ class solve_aerosol(object):
         shape1    =                    (self.num_blocks, self.block_size, self.num_blocks, self.block_size)
         shape2    = (self.vza.shape[0], self.num_blocks, self.block_size, self.num_blocks, self.block_size) 
         self.ele  = np.nanmean(self._extend_vals(self.ele ).reshape(shape1), axis=(3,1))
-        self.aot  = np.nanmean(self._extend_vals(self.aot ).reshape(shape1), axis=(3,1)) * (1-0.14)
+        self.aot  = np.nanmean(self._extend_vals(self.aot ).reshape(shape1), axis=(3,1))
         self.tcwv = np.nanmean(self._extend_vals(self.tcwv).reshape(shape1), axis=(3,1))
         self.tco3 = np.nanmean(self._extend_vals(self.tco3).reshape(shape1), axis=(3,1))
         self.saa  = np.nanmean(self._extend_vals(self.saa ).reshape(shape2), axis=(4,2))
         self.sza  = np.nanmean(self._extend_vals(self.sza ).reshape(shape2), axis=(4,2))
         self.vaa  = np.nanmean(self._extend_vals(self.vaa ).reshape(shape2), axis=(4,2))
         self.vza  = np.nanmean(self._extend_vals(self.vza ).reshape(shape2), axis=(4,2))
-        self.aot_unc    = np.ones(self.aot.shape)  * 1.
-        self.tcwv_unc   = np.ones(self.tcwv.shape) * 0.8
-        self.tco3_unc   = np.ones(self.tco3.shape) * 0.2
+        self.aot_unc    = np.ones(self.aot.shape)  * 2.
+        self.tcwv_unc   = np.ones(self.tcwv.shape) * 2.
+        self.tco3_unc   = np.ones(self.tco3.shape) * 0.5
         mod08_aot       = self._mod08_aot()
         self.logger.info('Mean values for priors are: %.02f, %.02f, %.02f and mod08 is %.02f'%\
                          (np.nanmean(self.aot), np.nanmean(self.tcwv), np.nanmean(self.tco3), mod08_aot))
-        if np.isnan(mod08_aot):
-            self.aot    = self.aot  * (1-0.14) # validation of +14% biase
-        else:
-            temp        = np.zeros_like(self.aot)
-            temp[:]     = mod08_aot
-            self.aot    = temp
+        self.aot        = self.aot - (np.nanmean(self.aot) - np.nanmean([mod08_aot, np.nanmean(self.aot)]))
+        #if np.isnan(mod08_aot):
+        #    self.aot    = self.aot 
+        #else:
+        #    temp        = np.zeros_like(self.aot)
+        #    temp[:]     = mod08_aot
+        #    self.aot    = temp
         self.toa        = l8._get_toa()
         self.logger.info('Applying PSF model.')
         if self.l8_psf is None:
@@ -412,5 +413,5 @@ class solve_aerosol(object):
             dst_ds = None
         self.aot_map, self.tcwv_map, self.tco3_map = self.solved
 if __name__ == '__main__':
-    aero = solve_aerosol(2017, 7, 10, l8_tile = (123, 34), mcd43_dir   = '/data/selene/ucfajlg/Hebei/MCD43/')
+    aero = solve_aerosol(2017, 3, 4, l8_tile = (123, 34), mcd43_dir   = '/data/selene/ucfajlg/Hebei/MCD43/')
     aero.solving_l8_aerosol()

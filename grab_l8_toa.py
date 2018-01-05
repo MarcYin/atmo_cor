@@ -46,8 +46,8 @@ class read_l8(object):
         self.mete_file =  self.toa_dir + '/%s_MTL.txt'%self.header 
         self.qa_file   =  self.toa_dir + '/%s_bqa.tif'%self.header
         try:
-            self.saa_sza = [self.toa_dir + '/%s_solar_B%02d.img' %(self.header, i) for i in self.bands]
-            self.vaa_vza = [self.toa_dir + '/%s_sensor_B%02d.img'%(self.header, i) for i in self.bands]
+            self.saa_sza = [glob(self.toa_dir + '/%s_solar_B%02d.img' %(self.header, i))[0] for i in self.bands]
+            self.vaa_vza = [glob(self.toa_dir + '/%s_sensor_B%02d.img'%(self.header, i))[0] for i in self.bands]
         except:
             ang_file     = self.toa_dir + '/%s_ANG.txt'%self.header
             cwd = os.getcwd()

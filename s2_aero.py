@@ -242,13 +242,13 @@ class solve_aerosol(object):
         aot, tcwv, tco3 = np.array(self._read_cams(self.example_file)).reshape((3, self.num_blocks, \
                                    self.block_size, self.num_blocks, self.block_size)).mean(axis=(4, 2))
         mod08_aot       = self._mod08_aot()
-        if np.isnan(mod08_aot):
-            self.aot    = aot  * (1-0.14) # validation of +14% biase
-        else:
-            temp        = np.zeros_like(aot)
-            temp[:]     = mod08_aot
-            self.aot    = temp
-        self.tco3       = tco3 * 46.698 * (1 - 0.05)
+        #if np.isnan(mod08_aot):
+        self.aot        = aot - (aot.mean() - np.nanmean([mod08_aot, aot.mean()]))
+        #else:
+        #    temp        = np.zeros_like(aot)
+        #    temp[:]     = mod08_aot
+        #     self.aot    = temp
+        self.tco3       = tco3 * 46.698
         tcwv            = tcwv / 10. 
         self.tco3_unc   = np.ones(self.tco3.shape) * 0.2
         self.aot_unc    = np.ones(self.aot.shape)  * 1.
@@ -272,7 +272,7 @@ class solve_aerosol(object):
         except:
             self.s2_logger.warning('Getting aot from ddv failed.')
         '''
-        self.s2_logger.info('Mean values for priors are: %.02f, %.02f, %.02f and mod08 is %.02f'%(aot.mean() * (1-0.14), self.tcwv.mean(), self.tco3.mean(), mod08_aot))
+        self.s2_logger.info('Mean values for priors are: %.02f, %.02f, %.02f and mod08 aot is %.02f'%(aot.mean(), self.tcwv.mean(), self.tco3.mean(), mod08_aot))
         self.s2_logger.info('Applying PSF model.')
         if self.s2_psf is None:
             xstd, ystd, ang, xs, ys = self._get_psf(selected_img)

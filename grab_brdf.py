@@ -140,7 +140,7 @@ def MCD43_SurRef(MCD43_dir, example_file, year, doy, ang_files, sun_view_ang_sca
     geotransform = g.GetGeoTransform()
     hy = ((h_xgeo - geotransform[0])/geotransform[1]).astype(int)
     hx = ((h_ygeo - geotransform[3])/geotransform[5]).astype(int)
-    hmask = (hx>=0) & (hx<10980) & (hy>=0) & (hy<10980)
+    hmask = (hx>=0) & (hx<g.RasterYSize) & (hy>=0) & (hy<g.RasterXSize)
     hy = hy[hmask]
     hx = hx[hmask]
     #print 'got vrt'

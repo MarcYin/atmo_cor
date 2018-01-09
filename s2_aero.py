@@ -251,7 +251,7 @@ class solve_aerosol(object):
         self.tco3       = tco3 * 46.698
         tcwv            = tcwv / 10. 
         self.tco3_unc   = np.ones(self.tco3.shape) * 0.2
-        self.aot_unc    = np.ones(self.aot.shape)  * 1.
+        self.aot_unc    = np.ones(self.aot.shape)  * 2.
         
         self.s2_logger.info('Trying to get the tcwv from the emulation of sen2cor look up table.')
         try:

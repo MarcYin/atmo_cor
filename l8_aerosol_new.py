@@ -13,6 +13,7 @@ from glob import glob
 from scipy import signal, ndimage
 import cPickle as pkl
 from osgeo import osr
+#from smoothn import smoothn
 from multi_process import parmap
 from scipy.ndimage import binary_dilation, binary_erosion
 from reproject import reproject_data
@@ -41,10 +42,11 @@ class solve_aerosol(object):
                  global_dem  = '/home/ucfafyi/DATA/Multiply/eles/global_dem.vrt',
                  cams_dir    = '/home/ucfafyi/DATA/Multiply/cams/',
                  mod08_dir   = '/home/ucfafyi/DATA/Multiply/mod08/',                 
+                 myd08_dir   = '/home/ucfafyi/DATA/Multiply/myd08/',                 
                  l8_tile     = (123, 34),
                  l8_psf      = None,
                  qa_thresh   = 255,
-                 aero_res    = 6000, # resolution for aerosol retrival in meters should be larger than 500
+                 aero_res    = 7000, # resolution for aerosol retrival in meters should be larger than 500
                  ):
 
         self.year        = year
@@ -59,6 +61,7 @@ class solve_aerosol(object):
         self.global_dem  = global_dem
         self.cams_dir    = cams_dir
         self.mod08_dir   = mod08_dir
+        self.myd08_dir   = myd08_dir
         self.l8_tile     = l8_tile
         self.l8_psf      = l8_psf
         self.bands       = [2, 3, 4, 5, 6, 7]
@@ -108,17 +111,25 @@ class solve_aerosol(object):
         dst_ds.FlushCache()
         dst_ds = None
 
-    def _mod08_aot(self,):
+    def _mcd08_aot(self,):
+        temp = 'HDF4_EOS:EOS_GRID:"%s":mod08:Aerosol_Optical_Depth_Land_Ocean_Mean'
         try:
-            temp = 'HDF4_EOS:EOS_GRID:"%s":mod08:Aerosol_Optical_Depth_Land_Ocean_Mean'
             g = gdal.Open(temp%glob('%s/MOD08_D3.A2016%03d.006.*.hdf'%(self.mod08_dir, self.doy))[0])
             dat = reproject_data(g, self.example_file, outputType= gdal.GDT_Float32).data * g.GetRasterBand(1).GetScale() + g.GetRasterBand(1).GetOffset()
             dat[dat<=0]  = np.nan
-            dat[dat>1.5] = np.nan 
+            dat[dat>1.7] = np.nan 
             mod08_aot = np.nanmean(dat)
         except:
             mod08_aot = np.nan
-        return mod08_aot
+        try:
+            g1 = gdal.Open(temp%glob('%s/MYD08_D3.A2016%03d.006.*.hdf'%(self.myd08_dir, self.doy))[0])
+            dat1 = reproject_data(g1, self.example_file, outputType= gdal.GDT_Float32).data * g1.GetRasterBand(1).GetScale() + g1.GetRasterBand(1).GetOffset()
+            dat1[dat1<=0]  = np.nan
+            dat1[dat1>1.7] = np.nan
+            myd08_aot = np.nanmean(dat1)
+        except:
+            myd08_aot = np.nan
+        return mod08_aot, myd08_aot
 
     def _get_psf(self,):
         self.logger.info('No PSF parameters specified, start solving.')
@@ -178,11 +189,14 @@ class solve_aerosol(object):
 
         self.logger.info('Getting pripors from ECMWF forcasts.')
         self.aot, self.tcwv, self.tco3    = np.array(self._read_cams(self.example_file))
+        self.toa        = l8._get_toa()
         self.saa, self.sza, self.vaa, self.vza = l8._get_angles()
         self.saa[self.saa.mask] = self.sza[self.sza.mask] = \
         self.vaa[self.vaa.mask] = self.vza[self.vza.mask] = np.nan
+        self.logger.info('Getting DDV aot prior')
+        self._get_ddv_aot(self.toa, l8, self.tcwv, self.tco3, ele_data)
         self.logger.info('Sorting data.')
-        self.block_size = int(self.aero_res / 30.)
+        self.block_size = int(np.ceil(1. * self.aero_res / 30.))
         self.num_blocks = int(np.ceil(max(self.full_res) / (1. * self.block_size)))
         self.efull_res  = self.block_size * self.num_blocks
         shape1    =                    (self.num_blocks, self.block_size, self.num_blocks, self.block_size)
@@ -195,20 +209,20 @@ class solve_aerosol(object):
         self.sza  = np.nanmean(self._extend_vals(self.sza ).reshape(shape2), axis=(4,2))
         self.vaa  = np.nanmean(self._extend_vals(self.vaa ).reshape(shape2), axis=(4,2))
         self.vza  = np.nanmean(self._extend_vals(self.vza ).reshape(shape2), axis=(4,2))
-        self.aot_unc    = np.ones(self.aot.shape)  * 2.
-        self.tcwv_unc   = np.ones(self.tcwv.shape) * 2.
-        self.tco3_unc   = np.ones(self.tco3.shape) * 0.5
-        mod08_aot       = self._mod08_aot()
-        self.logger.info('Mean values for priors are: %.02f, %.02f, %.02f and mod08 is %.02f'%\
-                         (np.nanmean(self.aot), np.nanmean(self.tcwv), np.nanmean(self.tco3), mod08_aot))
-        self.aot        = self.aot - (np.nanmean(self.aot) - np.nanmean([mod08_aot, np.nanmean(self.aot)]))
+        self.aot_unc    = np.ones(self.aot.shape)  * 1.
+        self.tcwv_unc   = np.ones(self.tcwv.shape) * 0.5
+        self.tco3_unc   = np.ones(self.tco3.shape) * 0.2
+        #mod08_aot, myd08_aot = self._mcd08_aot()
+        #self.logger.info('Mean values for priors are: %.02f, %.02f, %.02f and mod08 and myd08 aot are: %.02f, %.02f'%\
+        #                 (np.nanmean(self.aot), np.nanmean(self.tcwv), np.nanmean(self.tco3), mod08_aot, myd08_aot))
+        self.logger.info('Mean values for priors are: %.02f, %.02f, %.02f'%\
+                         (np.nanmean(self.aot), np.nanmean(self.tcwv), np.nanmean(self.tco3)))
         #if np.isnan(mod08_aot):
-        #    self.aot    = self.aot 
+        self.aot[:]    = self.aot.mean()
         #else:
         #    temp        = np.zeros_like(self.aot)
         #    temp[:]     = mod08_aot
         #    self.aot    = temp
-        self.toa        = l8._get_toa()
         self.logger.info('Applying PSF model.')
         if self.l8_psf is None:
             xstd, ystd, ang, xs, ys = self._get_psf()
@@ -256,7 +270,7 @@ class solve_aerosol(object):
         self.mask = np.nansum(self._extend_vals((~self.dcloud).astype(int)).reshape(shape1), axis=(3,1))
         self.mask = ((self.mask/((1.*self.block_size)**2)) >= 0.5) & ((tempm/((self.aero_res/500.)**2)) >= 0.5) & \
                      (np.any(~np.isnan([self.aot, self.tcwv, self.tco3, self.sza[0]]), axis = 0))
-        self.mask = binary_erosion(self.mask, structure=np.ones((3,3)).astype(bool))
+        self.mask = binary_erosion(self.mask, structure=np.ones((5, 5)).astype(bool))
         self.aero = solving_atmo_paras(self.boa,
                                   self.toa,
                                   self.sza,
@@ -295,12 +309,12 @@ class solve_aerosol(object):
 	        ndvi_mask[:]      = False
 	        ndvi_mask[Hx, Hy] = True
 	    Hx, Hy    = np.where(ndvi_mask)
-	    blue_vza  = np.cos(np.deg2rad(l8.vza[0, Hx, Hy]))
-            blue_sza  = np.cos(np.deg2rad(l8.sza[0, Hx, Hy]))
-	    red_vza   = np.cos(np.deg2rad(l8.vza[2, Hx, Hy])) 
-            red_sza   = np.cos(np.deg2rad(l8.sza[2, Hx, Hy]))
-	    blue_raa  = np.cos(np.deg2rad(l8.vaa[0, Hx, Hy] - l8.saa[0, Hx, Hy]))
-	    red_raa   = np.cos(np.deg2rad(l8.vaa[2, Hx, Hy] - l8.saa[2, Hx, Hy]))
+	    blue_vza  = np.cos(np.deg2rad(self.vza[0, Hx, Hy]))
+            blue_sza  = np.cos(np.deg2rad(self.sza[0, Hx, Hy]))
+	    red_vza   = np.cos(np.deg2rad(self.vza[2, Hx, Hy])) 
+            red_sza   = np.cos(np.deg2rad(self.sza[2, Hx, Hy]))
+	    blue_raa  = np.cos(np.deg2rad(self.vaa[0, Hx, Hy] - self.saa[0, Hx, Hy]))
+	    red_raa   = np.cos(np.deg2rad(self.vaa[2, Hx, Hy] - self.saa[2, Hx, Hy]))
 	    red, blue = toa[2, Hx, Hy], toa[0, Hx, Hy]
 	    swif      = toa[5, Hx, Hy]
 	    red_emus  = np.array(self.emus)[:, 3]
@@ -396,6 +410,8 @@ class solve_aerosol(object):
                 g_data = griddata(np.array(np.where(self.mask)).T, para_map[self.mask], \
                                  (np.repeat(range(self.num_blocks), self.num_blocks).reshape(self.num_blocks, self.num_blocks), \
                                   np.tile  (range(self.num_blocks), self.num_blocks).reshape(self.num_blocks, self.num_blocks)), method='nearest')
+                #s      = smoothn(g_data.copy(), isrobust=True, verbose=False)[1]
+                #g_data = smoothn(g_data.copy(), isrobust=True, verbose=False, s=s)[0] 
             else:
                 g_data = priors[i]
             self.solved[i] = g_data
@@ -413,5 +429,5 @@ class solve_aerosol(object):
             dst_ds = None
         self.aot_map, self.tcwv_map, self.tco3_map = self.solved
 if __name__ == '__main__':
-    aero = solve_aerosol(2017, 3, 4, l8_tile = (123, 34), mcd43_dir   = '/data/selene/ucfajlg/Hebei/MCD43/')
+    aero = solve_aerosol(2017, 7, 10, l8_tile = (123, 34), mcd43_dir   = '/data/selene/ucfajlg/Hebei/MCD43/')
     aero.solving_l8_aerosol()

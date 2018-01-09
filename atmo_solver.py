@@ -32,7 +32,7 @@ class solving_atmo_paras(object):
                  band_indexs,
                  band_wavelength,
                  pix_res = 10.,
-                 gamma   = 0.5,
+                 gamma   = 1.,
                  alpha   = -1.6,# from nasa modis climatology
                  subsample = 1,
                  subsample_start = 0
@@ -153,6 +153,58 @@ class solving_atmo_paras(object):
         X[:, 3:6, :] = np.array(p)
         xap_H,  xbp_H,  xcp_H  = [], [], []
         xap_dH, xbp_dH, xcp_dH = [], [], []
+          
+        for i in range(len(self.xap_emus)):
+            H, dH   = self.xap_emus[i].predict(X[i].T, do_unc=False) 
+            H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
+                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
+            xap_H. append(H [self.resample_hx,self.resample_hy])
+            xap_dH.append(dH[self.resample_hx,self.resample_hy,:])
+
+            H, dH   = self.xbp_emus[i].predict(X[i].T, do_unc=False) 
+            H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
+                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
+            xbp_H. append(H [self.resample_hx,self.resample_hy])
+            xbp_dH.append(dH[self.resample_hx,self.resample_hy,:])
+
+            H, dH   = self.xcp_emus[i].predict(X[i].T, do_unc=False) 
+            H, dH   = np.array(H).reshape(self.num_blocks_x, self.num_blocks_y), \
+                      np.array(dH)[:,3:6].reshape(self.num_blocks_x, self.num_blocks_y, 3)
+            xcp_H. append(H [self.resample_hx,self.resample_hy])
+            xcp_dH.append(dH[self.resample_hx,self.resample_hy,:])
+        #import pdb;pdb.set_trace()
+        xap_H,  xbp_H,  xcp_H  = np.array(xap_H),  np.array(xbp_H),  np.array(xcp_H)
+        xap_dH, xbp_dH, xcp_dH = np.array(xap_dH), np.array(xbp_dH), np.array(xcp_dH)
+        y        = xap_H * self.toa - xbp_H
+        sur_ref  = y / (1 + xcp_H * y)
+        diff     = sur_ref - self.boa
+        full_J   = np.nansum(0.5 * self.band_weights[...,None] * (diff)**2 / self.boa_unc**2, axis=0)
+        J        = np.zeros(self.full_res)
+        J[self.Hx, self.Hy] = full_J
+        J = np.nansum(J.reshape(self.num_blocks_x, self.block_size, \
+                                self.num_blocks_y, self.block_size).sum(axis=(3,1))*self.mask)
+        dH       = -1 * (-self.toa[...,None] * xap_dH + xcp_dH * (xbp_H[...,None] - xap_H[...,None] * self.toa[...,None])**2 + \
+                         xbp_dH) /(self.toa[...,None] * xap_H[...,None] * xcp_H[...,None] - xbp_H[...,None] * xcp_H[...,None] + 1)**2
+        full_dJ  = [ self.band_weights[...,None] * dH[:,:,i] * diff / (self.boa_unc**2) for i in range(3)]
+
+        if is_full:
+            dJ = np.nansum(np.array(full_dJ), axis=(1,))
+            J_ = np.zeros((3,) + self.full_res)
+            J_[:, self.Hx, self.Hy] = dJ
+            J_ = np.nansum(J_.reshape(3, self.num_blocks_x, self.block_size, \
+                                         self.num_blocks_y, self.block_size), axis=(4,2))
+            J_[:, ~self.mask] = 0
+            J_ = J_.reshape(3, -1)
+        else:
+            J_ = np.nansum(np.array(full_dJ), axis=(1, 2))
+        return J, J_
+
+    def _obs_cost_test(self, p, is_full = True):
+        p = np.array(p).reshape(3, -1)
+        X = self.control_variables.reshape(self.boa.shape[0], 7, -1)
+        X[:, 3:6, :] = np.array(p)
+        xap_H,  xbp_H,  xcp_H  = [], [], []
+        xap_dH, xbp_dH, xcp_dH = [], [], []
         emus = list(self.xap_emus) + list(self.xbp_emus) + list(self.xcp_emus)
         Xs   = list(X)        + list(X)        + list(X)
         inps = zip(emus, Xs)
@@ -167,8 +219,15 @@ class solving_atmo_paras(object):
         J[self.Hx, self.Hy] = full_J
         J = np.nansum(J.reshape(self.num_blocks_x, self.block_size, \
                                 self.num_blocks_y, self.block_size).sum(axis=(3,1))*self.mask)
-        dH       = -1 * (-self.toa[...,None] * xap_dH + xcp_dH * (xbp_H[...,None] - xap_H[...,None] * self.toa[...,None])**2 + \
-                         xbp_dH) /(self.toa[...,None] * xap_H[...,None] * xcp_H[...,None] - xbp_H[...,None] * xcp_H[...,None] + 1)**2
+        #dH       = -1 * (-self.toa[...,None] * xap_dH + xcp_dH * (xbp_H[...,None] - xap_H[...,None] * self.toa[...,None])**2 + \
+        #                 xbp_dH) /(self.toa[...,None] * xap_H[...,None] * xcp_H[...,None] - xbp_H[...,None] * xcp_H[...,None] + 1)**2
+        dH       = -1 * (-self.toa[...,None] * xap_dH - \
+                         2 * self.toa[...,None] * xap_H[...,None] * xbp_H[...,None] * xcp_dH + \
+                         self.toa[...,None]**2 * xap_H[...,None]**2 * xcp_dH + \
+                         xbp_dH + \
+                         xbp_H[...,None]**2 * xcp_dH) / \
+                         (self.toa[...,None] * xap_H[...,None] * xcp_H[...,None] - \
+                          xbp_H[...,None] * xcp_H[...,None] + 1)**2 
         full_dJ  = [ self.band_weights[...,None] * dH[:,:,i] * diff / (self.boa_unc**2) for i in range(3)]
         
         if is_full:

@@ -147,7 +147,7 @@ class solve_aerosol(object):
         
         self.logger.info('Getting pripors from ECMWF forcasts.')
         aot, tcwv, tco3 = np.array(self._read_cams(self.example_file))
-        
+        self._get_ddv_aot(toa, l8, tcwv, tco3, ele_data) 
    
 
         aot, tcwv, tco3 = np.array(self._read_cams(self.example_file))

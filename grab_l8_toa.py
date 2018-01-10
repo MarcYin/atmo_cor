@@ -39,8 +39,8 @@ class read_l8(object):
         else:
             self.bands = np.array(bands)
         self.angle_exe = angle_exe
-        composite      = glob(self.toa_dir + '/LC08_L1TP_%03d%03d_%04d%02d%02d_*_01_??_toa_band1.tif' \
-                         % ( self.tile[0], self.tile[1], self.year, self.month, self.day))[0].split('/')[-1].split('_')[:-2]
+        composite      = glob(self.toa_dir + '/LC08_L1TP_%03d%03d_%04d%02d%02d_*_01_??_b1.tif' \
+                         % ( self.tile[0], self.tile[1], self.year, self.month, self.day))[0].split('/')[-1].split('_')[:-1]
         self.header    = '_'.join(composite)    
         self.toa_file  = [self.toa_dir + '/%s_b%d.tif'%(self.header, i) for i in self.bands]
         self.mete_file =  self.toa_dir + '/%s_MTL.txt'%self.header 

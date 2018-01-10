@@ -83,8 +83,10 @@ class atmospheric_correction(object):
         self.boa = np.array([i[2] for i in ret]).reshape(self._num_blocks_x, self._num_blocks_y, self.toa.shape[0], \
                              self._block_size, self._block_size).transpose(2,0,3,1,4).reshape(self.toa.shape[0], \
                              self._num_blocks_x*self._block_size, self._num_blocks_y*self._block_size)[:, : self.shape[0], : self.shape[1]]
+        self.boa[:, gdal.Open(self.l8_toa_dir + '/%s_bqa.tif'%l8.header).ReadAsArray() == 1] = np.nan
+        self.toa[:, gdal.Open(self.l8_toa_dir + '/%s_bqa.tif'%l8.header).ReadAsArray() == 1] = np.nan
         self.boa_rgb = np.clip(self.boa[[3,2,1]].transpose(1,2,0) * 255 / 0.255, 0, 255).astype(uint8)
-        self.toa_rgb = np.clip(self.toa[[3,2,1]].transpose(1,2,0) * 255 / 0.255, 0, 255).astype(uint8)
+        self.toa_rgb = np.clip(self.toa[[3,2,1]].data.transpose(1,2,0) * 255 / 0.255, 0, 255).astype(uint8)
         self.logger.info('Saving corrected results')
         self._save_rgb(self.toa_rgb, 'TOA_RGB', self.example_file)
         self._save_rgb(self.boa_rgb, 'BOA_RGB', self.example_file)
@@ -152,13 +154,17 @@ class atmospheric_correction(object):
     def _save_band(self, band_ref, projection, geotransform):
         band, ref = band_ref
         nx, ny = ref.shape
-        outputFileName = self.l8_toa_dir + '/%s_%s_sur.tif'%(self.l8_header, band)
+        outputFileName = self.l8_toa_dir + '/%s_b%s_sur.tif'%(self.l8_header, band)
         if os.path.exists(outputFileName):
             os.remove(outputFileName)
-        dst_ds = gdal.GetDriverByName('GTiff').Create(outputFileName, ny, nx, 1, gdal.GDT_Float32)
+        dst_ds = gdal.GetDriverByName('GTiff').Create(outputFileName, ny, nx, 1, gdal.GDT_Int16)
         dst_ds.SetGeoTransform(geotransform)    
         dst_ds.SetProjection(projection) 
-        dst_ds.GetRasterBand(1).WriteArray(ref)
+        sur = ref * 10000
+        sur[np.isnan(sur)] = -9999
+        sur = sur.astype(np.int16)
+        dst_ds.GetRasterBand(1).SetNoDataValue(-9999)
+        dst_ds.GetRasterBand(1).WriteArray(sur)
         dst_ds.FlushCache()                  
         dst_ds = None
 

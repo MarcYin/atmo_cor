@@ -182,6 +182,62 @@ class solve_aerosol(object):
             mod08_aot = np.nan
         return mod08_aot
 
+    def _get_ddv_aot(self, toa, tcwv, tco3, ele_data):
+        ndvi_mask = (((toa[3] - toa[2])/(toa[3] + toa[2])) > 0.4) & (toa[5] > 0.01) & (toa[5] < 0.25)
+        if ndvi_mask.sum() < 100:
+            self.logger.info('No enough DDV found in this sence for aot restieval, and only cams prediction used.')
+        else:
+            Hx, Hy = np.where(ndvi_mask)
+            if ndvi_mask.sum() > 1000:
+                random_choice     = np.random.choice(len(Hx), 1000, replace=False)
+                random_choice.sort()
+                Hx, Hy            = Hx[random_choice], Hy[random_choice]
+                ndvi_mask[:]      = False
+                ndvi_mask[Hx, Hy] = True
+            Hx, Hy    = np.where(ndvi_mask)
+            blue_vza  = np.cos(np.deg2rad(self.vza[0, Hx, Hy]))
+            blue_sza  = np.cos(np.deg2rad(self.sza[Hx, Hy]))
+            red_vza   = np.cos(np.deg2rad(self.vza[2, Hx, Hy]))
+            red_sza   = np.cos(np.deg2rad(self.sza[Hx, Hy]))
+            blue_raa  = np.cos(np.deg2rad(self.vaa[0, Hx, Hy] - self.saa[Hx, Hy]))
+            red_raa   = np.cos(np.deg2rad(self.vaa[2, Hx, Hy] - self.saa[Hx, Hy]))
+            red, blue = toa[2, Hx, Hy], toa[0, Hx, Hy]
+            swif      = toa[5, Hx, Hy]
+            red_emus  = np.array(self.emus)[:, 3]
+            blue_emus = np.array(self.emus)[:, 1]
+
+            zero_aod    = np.zeros_like(red)
+            red_inputs  = np.array([red_sza,  red_vza,  red_raa,  zero_aod, tcwv[Hx, Hy], tco3[Hx, Hy], ele_data[Hx, Hy]])
+            blue_inputs = np.array([blue_sza, blue_vza, blue_raa, zero_aod, tcwv[Hx, Hy], tco3[Hx, Hy], ele_data[Hx, Hy]])
+
+            p           = np.r_[np.arange(0, 1., 0.02), np.arange(1., 1.5, 0.05),  np.arange(1.5, 2., 0.1)]
+            f           =  lambda aot: self._ddv_cost(aot, blue, red, swif, blue_inputs, red_inputs,  blue_emus, red_emus)
+            costs       = parmap(f, p)
+            min_ind     = np.argmin(costs)
+            self.logger.info('DDV solved aod is %.02f, and it will used as the mean value of cams prediction.'% p[min_ind])
+            self.aot[:] = p[min_ind]
+
+    def _ddv_cost(self, aot, blue, red, swif, blue_inputs, red_inputs,  blue_emus, red_emus):
+        blue_inputs[3, :] = aot
+        red_inputs [3, :] = aot
+        blue_xap_emu, blue_xbp_emu, blue_xcp_emu = blue_emus
+        red_xap_emu,  red_xbp_emu,  red_xcp_emu  = red_emus
+        blue_xap, blue_xbp, blue_xcp             = blue_xap_emu.predict(blue_inputs.T)[0], \
+                                                   blue_xbp_emu.predict(blue_inputs.T)[0], \
+                                                   blue_xcp_emu.predict(blue_inputs.T)[0]
+        red_xap,  red_xbp,  red_xcp              = red_xap_emu.predict(red_inputs.T)  [0], \
+                                                   red_xbp_emu.predict(red_inputs.T)  [0], \
+                                                   red_xcp_emu.predict(red_inputs.T)  [0]
+        y        = blue_xap * blue - blue_xbp
+        blue_sur = y / (1 + blue_xcp * y)
+        y        = red_xap * red - red_xbp
+        red_sur  = y / (1 + red_xcp * y)
+        blue_dif = (blue_sur - 0.25 * swif)**2
+        red_dif  = (red_sur  - 0.5  * swif)**2
+        cost     = 0.5 * (blue_dif + red_dif)
+        return cost.sum()
+
+
     def _s2_aerosol(self,):
         
         self.s2_logger.propagate = False

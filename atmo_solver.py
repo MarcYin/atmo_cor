@@ -32,7 +32,7 @@ class solving_atmo_paras(object):
                  band_indexs,
                  band_wavelength,
                  pix_res = 10.,
-                 gamma   = 1.,
+                 gamma   = 0.5,
                  alpha   = -1.6,# from nasa modis climatology
                  subsample = 1,
                  subsample_start = 0
@@ -300,7 +300,7 @@ class solving_atmo_paras(object):
     def _cost(self, p):
         print '-------------------------------------------------------------------------------'
         print np.array(p).reshape(3, -1)[:, self.mask.ravel()]
-        obs_J, obs_J_       = self._obs_cost(p)
+        obs_J, obs_J_       = self._obs_cost_test(p)
         prior_J, prior_J_   = self._prior_cost(p)
         #smooth_J, smooth_J_ = self._smooth_cost(p)
         smooth_J, smooth_J_ = self._new_smooth_cost(p)

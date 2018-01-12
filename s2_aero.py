@@ -45,7 +45,7 @@ class solve_aerosol(object):
                  s2_tile     = '29SQB',
                  s2_psf      = None,
                  qa_thresh   = 255,
-                 aero_res    = 3050, # resolution for aerosol retrival in meters should be larger than 500
+                 aero_res    = 1220, # resolution for aerosol retrival in meters should be larger than 500
                  reconstruct_s2_angle = True):
 
         self.year        = year 
@@ -437,7 +437,7 @@ class solve_aerosol(object):
 	    rep_g   = reproject_data(g, example_file, outputType= gdal.GDT_Float32).g
 	    data    = rep_g.GetRasterBand(ind+1).ReadAsArray()
 	    data    = data*scale + offset
-	    mask    = (data == (bad_pix*scale + offset))
+	    mask    = (data == (bad_pix*scale + offset)) | np.isnan(data)
 	    if mask.sum()>=1:
 		data[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), data[~mask])
 	    results.append(data)

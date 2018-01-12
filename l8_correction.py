@@ -74,7 +74,7 @@ class atmospheric_correction(object):
         self.shape = self.toa.shape[1:3]
         self._block_size = 3000
         self._num_blocks_x, self._num_blocks_y = int(np.ceil(1. * self.shape[0] / self._block_size)), int(np.ceil(1. * self.shape[1] / self._block_size))
-        self._mean_size  = 60
+        self._mean_size  = 30
         rows              = np.repeat(np.arange(self._num_blocks_x), self._num_blocks_y)
         columns           = np.tile  (np.arange(self._num_blocks_y), self._num_blocks_x)
         blocks            = zip(rows, columns)

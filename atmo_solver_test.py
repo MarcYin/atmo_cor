@@ -299,7 +299,7 @@ class solving_atmo_paras(object):
 
     def _cost(self, p):
         print '-------------------------------------------------------------------------------'
-        print 'Means:   ', np.array(p).reshape(3, -1)[:, self.mask.ravel()].mean(axis=-1)
+        print 'Means:  ', np.array(p).reshape(3, -1)[:, self.mask.ravel()].mean(axis=-1)
         obs_J, obs_J_       = self._obs_cost_test(p)
         prior_J, prior_J_   = self._prior_cost(p)
         #smooth_J, smooth_J_ = self._smooth_cost(p)
@@ -311,6 +311,9 @@ class solving_atmo_paras(object):
         print '-------------------------------------------------------------------------------'
         return J, J_
         
+    def _pure_cost(self, p):
+        J, J_ = self._cost(p)
+        Jprime = J_ 
     def _optimization(self,):
         self._pre_process()
         p0  = self.priors
@@ -322,9 +325,50 @@ class solving_atmo_paras(object):
         bot = bot.ravel()
         up  = up.ravel()
         bounds  = np.array([bot, up]).T 
-        psolve = optimize.fmin_l_bfgs_b(self._cost, p0, approx_grad = 0, iprint = 1, m=20,\
-                                        maxiter=500, pgtol = 1e-3,factr=1e6, bounds = bounds,fprime=None)
-        return psolve
+        
+        gamma = 0.01
+        p     = p0.copy()
+        Js    =  []
+        ps    = []
+        J, J_   = self._cost(p0)
+        Js.append(J)
+        ps.append(p0)
+        for i in range(100):
+            p -= gamma * J_
+	    J, J_ = self._cost(p) 
+            J += (((p < bot) | (p > up)).sum()) * 1e8
+            p[p < bot] = bot[p < bot]
+            p[p > up ] = up [p > up ]
+            #gamma = 1 * 2**(-i-1)
+            #gamma = np.nansum((p - ps[-1])*(J-Js[-1]))/np.nansum(J-Js[-1])**2
+            #gamma = (p1 - p) * (J_ - J1_)/(J_ - J1_)**2 
+            #J, J_ = J1, J1_
+            #p     = p1
+            Js.append(J)
+            ps.append(p.copy())
+        jj
+        '''
+        for i in range(20):
+            J, J_ = self._cost(p) 
+            p -= J_*0.1
+            Js.append(J)
+            ps.append(p)
+            #if abs((J-J_old)).sum()/self.mask.sum() < 1e-10:
+            #    return p
+            #elif max(abs(J_)) < 1e-5:
+            #    return p
+            #else:
+            #    J_old = J
+            #return p
+            
+        jj
+         '''
+        #solved = optimize.root(self._cost,  p0, jac=True, method= 'krylov') 
+        #solved = optimize.fmin_tnc(self._cost, p0, approx_grad = 0, disp = 5, maxfun=500,  bounds = bounds, fprime=None)
+        #psolve = optimize.fmin_l_bfgs_b(self._cost, p0, approx_grad = 0, iprint = 101, m=20,\
+        #                                maxiter=500, pgtol = 1e-5,factr=1e3, bounds = bounds,fprime=None)
+        #ijj
+        #return p
 
 if __name__ == '__main__':
     sza  = np.ones((23,23))

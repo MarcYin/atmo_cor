@@ -46,7 +46,7 @@ class solve_aerosol(object):
                  l8_tile     = (123, 34),
                  l8_psf      = None,
                  qa_thresh   = 255,
-                 aero_res    = 7000, # resolution for aerosol retrival in meters should be larger than 500
+                 aero_res    = 1000, # resolution for aerosol retrival in meters should be larger than 500
                  ):
 
         self.year        = year
@@ -178,8 +178,16 @@ class solve_aerosol(object):
                                        np.array(self.spectral_transform)[1][...,None]
         self.logger.info('Reading in TOA reflectance.')
         self.sen_time = l8.sen_time
+
         self.cloud    = l8._get_qa()
         self.full_res = self.cloud.shape
+        self.ecloud   = binary_erosion(self.cloud, structure=np.ones((3,3)).astype(bool), iterations=10).astype(bool)
+        border_mask   = np.zeros(self.full_res).astype(bool)
+        border_mask[[0, -1], :] = True
+        border_mask[:, [0, -1]] = True
+        xstd, ystd    = 12., 20.
+        ker_size      = 2*int(round(max(1.96*xstd, 1.96*ystd)))
+        self.dcloud   = binary_dilation(self.ecloud | border_mask, structure=np.ones((3,3)).astype(bool), iterations=ker_size/2+10).astype(bool)
 
         self.logger.info('Getting elevation.')
         ele_data = reproject_data(self.global_dem, self.example_file, outputType = gdal.GDT_Float32).data/1000.
@@ -189,6 +197,8 @@ class solve_aerosol(object):
 
         self.logger.info('Getting pripors from ECMWF forcasts.')
         self.aot, self.tcwv, self.tco3    = np.array(self._read_cams(self.example_file))
+        self.logger.info('Mean values of priors are: %.02f, %.02f, %.02f'%\
+                         (np.nanmean(self.aot), np.nanmean(self.tcwv), np.nanmean(self.tco3)))
         self.toa        = l8._get_toa()
         self.saa, self.sza, self.vaa, self.vza = l8._get_angles()
         self.saa[self.saa.mask] = self.sza[self.sza.mask] = \
@@ -209,22 +219,19 @@ class solve_aerosol(object):
         self.sza  = np.nanmean(self._extend_vals(self.sza ).reshape(shape2), axis=(4,2))
         self.vaa  = np.nanmean(self._extend_vals(self.vaa ).reshape(shape2), axis=(4,2))
         self.vza  = np.nanmean(self._extend_vals(self.vza ).reshape(shape2), axis=(4,2))
-        self.aot_unc    = np.ones(self.aot.shape)  * 1.5
+        self.aot_unc    = np.ones(self.aot.shape)  * 0.8
         self.tcwv_unc   = np.ones(self.tcwv.shape) * 0.2
         self.tco3_unc   = np.ones(self.tco3.shape) * 0.2
         #mod08_aot, myd08_aot = self._mcd08_aot()
         #self.logger.info('Mean values for priors are: %.02f, %.02f, %.02f and mod08 and myd08 aot are: %.02f, %.02f'%\
         #                 (np.nanmean(self.aot), np.nanmean(self.tcwv), np.nanmean(self.tco3), mod08_aot, myd08_aot))
-        self.logger.info('Mean values for priors are: %.02f, %.02f, %.02f'%\
-                         (np.nanmean(self.aot), np.nanmean(self.tcwv), np.nanmean(self.tco3)))
         #if np.isnan(mod08_aot):
-        self.aot[:]    = self.aot.mean()
+        self.aot[:]    = np.nanmean(self.aot)
         #else:
         #    temp        = np.zeros_like(self.aot)
         #    temp[:]     = mod08_aot
         #    self.aot    = temp
         self.logger.info('Applying PSF model.')
-        self.ecloud   = binary_erosion(self.cloud, structure=np.ones((3,3)).astype(bool), iterations=10).astype(bool)
         if self.l8_psf is None:
             xstd, ystd, ang, xs, ys = self._get_psf()
         else:
@@ -240,11 +247,6 @@ class solve_aerosol(object):
         self.boa_qa   = self.boa_qa[:, shifted_mask]
 
         self.logger.info('Getting the convolved TOA reflectance.')
-        ker_size      = 2*int(round(max(1.96*xstd, 1.96*ystd)))
-        border_mask   = np.zeros(self.full_res).astype(bool)
-        border_mask[[0, -1], :] = True
-        border_mask[:, [0, -1]] = True
-        self.dcloud   = binary_dilation(self.ecloud | border_mask, structure=np.ones((3,3)).astype(bool), iterations=ker_size/2+10).astype(bool)
         self.bad_pixs = self.dcloud[self.Hx, self.Hy]
         ker           = self.gaussian(xstd, ystd, ang)
         f             = lambda img: signal.fftconvolve(img, ker, mode='same')[self.Hx, self.Hy]
@@ -269,9 +271,11 @@ class solve_aerosol(object):
         tempm = tempm.reshape(self.num_blocks, self.block_size, \
                               self.num_blocks, self.block_size).astype(int).sum(axis=(3,1))
         self.mask = np.nansum(self._extend_vals((~self.dcloud).astype(int)).reshape(shape1), axis=(3,1))
-        self.mask = ((self.mask/((1.*self.block_size)**2)) >= 0.5) & ((tempm/((self.aero_res/500.)**2)) >= 0.3) & \
+        self.mask = ((self.mask/((1.*self.block_size)**2)) > 0.) & ((tempm/((self.aero_res/500.)**2)) > 0.) & \
                      (np.any(~np.isnan([self.aot, self.tcwv, self.tco3, self.sza[0]]), axis = 0))
         self.mask = binary_erosion(self.mask, structure=np.ones((5, 5)).astype(bool))
+        self.tcwv[~self.mask] = np.nanmean(self.tcwv)
+        self.tco3[~self.mask] = np.nanmean(self.tco3)
         self.aero = solving_atmo_paras(self.boa,
                                   self.toa,
                                   self.sza,
@@ -293,12 +297,14 @@ class solve_aerosol(object):
                                   self.emus,
                                   self.band_indexs,
                                   self.boa_bands,
+                                  gamma = 2.,
+                                  alpha   = -1.2,
                                   pix_res = 30)
         solved    = self.aero._optimization()
         return solved
  
     def _get_ddv_aot(self, toa, l8, tcwv, tco3, ele_data):
-	ndvi_mask = (((toa[3] - toa[2])/(toa[3] + toa[2])) > 0.4) & (toa[5] > 0.01) & (toa[5] < 0.25)
+	ndvi_mask = (((toa[3] - 0.5*toa[5])/(toa[3] + 0.5*toa[5])) > 0.5) & (toa[5] > 0.01) & (toa[5] < 0.25) & (~self.dcloud)
 	if ndvi_mask.sum() < 100:
 	    self.logger.info('No enough DDV found in this sence for aot restieval, and only cams prediction used.') 
 	else:
@@ -329,8 +335,8 @@ class solve_aerosol(object):
 	    f           =  lambda aot: self._ddv_cost(aot, blue, red, swif, blue_inputs, red_inputs,  blue_emus, red_emus)
 	    costs       = parmap(f, p)
 	    min_ind     = np.argmin(costs)
-	    self.logger.info('DDV solved aod is %.02f, and it will used as the mean value of cams prediction.'% p[min_ind])
-            self.aot   += (p[min_ind] - self.aot.mean())
+	    self.logger.info('DDV solved aod is %.02f, and it will used as the mean value for cams prediction.'% p[min_ind])
+            self.aot[:] = p[min_ind]
 
     def _ddv_cost(self, aot, blue, red, swif, blue_inputs, red_inputs,  blue_emus, red_emus):
         blue_inputs[3, :] = aot
@@ -347,9 +353,10 @@ class solve_aerosol(object):
         blue_sur = y / (1 + blue_xcp * y)
         y        = red_xap * red - red_xbp
         red_sur  = y / (1 + red_xcp * y)
-        blue_dif = (blue_sur - 0.25 * swif)**2
-        red_dif  = (red_sur  - 0.5  * swif)**2
-        cost     = 0.5 * (blue_dif + red_dif)
+        blue_dif = 0 #(blue_sur - 0.25 * swif)**2
+        red_dif  = 0 #(red_sur  - 0.5  * swif)**2
+        rb_dif   = (blue_sur  - 0.55  * red_sur)**2
+        cost     = 0.5 * (blue_dif + red_dif + rb_dif)
         return cost.sum()
 
     def _read_cams(self, example_file, parameters = ['aod550', 'tcwv', 'gtco3'], this_scale=[1., 0.1, 46.698]):
@@ -373,7 +380,7 @@ class solve_aerosol(object):
 	    rep_g   = reproject_data(g, example_file, outputType = gdal.GDT_Float32).g
 	    data    = rep_g.GetRasterBand(ind+1).ReadAsArray()
 	    data    = data*scale + offset
-	    mask    = (data == (bad_pix*scale + offset))
+	    mask    = (data == (bad_pix*scale + offset)) | np.isnan(data)
 	    if mask.sum()>=1:
 		data[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), data[~mask])
 	    results.append(data*this_scale[i])
